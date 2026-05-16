@@ -1,0 +1,18 @@
+Instructions:
+Please solve the following problem by systematically applying the cognitive operations listed below. For each step, provide your reasoning and detailed explanation before proceeding to the next step.
+
+Cognitive Operations:
+1. Goal Clarification: Define the objective clearly.
+2. Decomposition: Break down the problem into manageable parts.
+3. Filtering: Focus on the most relevant information.
+4. Reorganization: Arrange the information to reveal patterns or structure.
+5. Pattern Recognition: Identify recurring patterns or relationships.
+6. Abstraction: Extract fundamental principles from the patterns.
+7. Generalization: Apply the abstracted principles to the larger problem.
+8. Integration: Synthesize the components into a cohesive solution.
+
+Problem:
+<QUESTION>
+
+Your Response:
+Please start with ’Goal Clarification’ and proceed through each cognitive operation step by step, providing detailed reasoning and explanations for each.

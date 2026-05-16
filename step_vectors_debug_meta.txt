@@ -1,0 +1,90 @@
+index	step_index	content_preview
+0	0	To find the vector \(\mathbf{v}\) that satisfies the cross product equation, let
+1	1	The cross product of \(\begin{pmatrix} 1 \\ 2 \\ -5 \end{pmatrix}\) and \(\mathb
+2	2	Setting this equal to \(\begin{pmatrix} 90 \\ 30 \\ 30 \end{pmatrix}\), we get t
+3	3	Solve the system of equations. Start with the third equation: \[v_2 = 2v_1 + 30.
+4	4	Substitute \(v_2\) into the first equation: \[2v_3 + 5(2v_1 + 30) = 90,\] which 
+5	5	Now we have two equations: \[ \begin{cases} v_3 + 5v_1 = -30 \\ -5v_1 - v_3 = 30
+6	6	Substitute \(v_2\) and \(v_3\) back into the expression for \(\mathbf{v}\): \[ \
+7	7	To minimize the magnitude of \(\mathbf{v}\), we need to minimize: \[ \|\mathbf{v
+8	8	Simplify the expression under the square root: \[ \|\mathbf{v}\|^2 = v_1^2 + (2v
+9	9	To minimize \(30v_1^2 + 420v_1 + 1800\), we take the derivative with respect to 
+10	10	Substitute \(v_1 = -7\) back into the expressions for \(v_2\) and \(v_3\): \[ v_
+11	11	Therefore, the vector \(\mathbf{v}\) that has the smallest magnitude is: \[ \mat
+12	12	The answer is: \(\begin{pmatrix} -7 \\ 16 \\ 5 \end{pmatrix}\).
+13	13	Let's denote the vector \(\mathbf{v}\) as \(\begin{pmatrix} x \\ y \\ z \end{pma
+14	14	The cross product is given by: \[ \begin{vmatrix} \mathbf{i} & \mathbf{j} & \mat
+15	15	Setting this equal to the given vector \(\begin{pmatrix} 90 \\ 30 \\ 30 \end{pma
+16	16	Solving the third equation for \(y\): \[ y = 2x + 30. \]
+17	17	Substitute \(y = 2x + 30\) into the first equation: \[ 2z + 5(2x + 30) = 90, \] 
+18	18	Substitute \(y = 2x + 30\) and \(z = -5x - 30\) into the second equation: \[ -(-
+19	19	We can choose \(x = 0\) to simplify calculations. Then: \[ y = 2(0) + 30 = 30, \
+20	20	To find the vector with the smallest magnitude, we note that the solution to the
+21	21	Calculate the magnitude of \(\mathbf{v}\): \[ \|\mathbf{v}\| = \sqrt{0^2 + 30^2 
+22	22	Let \(\mathbf{v} = \begin{pmatrix} x \\ y \\ z \end{pmatrix}\). The cross produc
+23	23	Solve the system of equations. Start with the third equation: \[ y - 2x = 30 \im
+24	24	To find the vector \(\mathbf{v}\) with the smallest magnitude, we need to minimi
+25	25	Verify the magnitude of \(\mathbf{v}\): \[ \|\mathbf{v}\| = \sqrt{(-7)^2 + 16^2 
+26	26	To find the vector \(\mathbf{v}\) that satisfies the given cross product equatio
+27	27	Set the result of the cross product equal to \(\begin{pmatrix} 90 \\ 30 \\ 30 \e
+28	28	Solve the system of equations. Start with the third equation: \[ y - 2x = 30 \im
+29	29	Substitute \(y = 2x + 30\) into the first equation: \[ 2z + 5(2x + 30) = 90 \imp
+30	30	Substitute \(y = 2x + 30\) and \(z = -5x - 30\) into the second equation: \[ -5x
+31	31	Simplify the expression under the square root: \[ \|\mathbf{v}\| = \sqrt{x^2 + (
+32	32	Substitute \(x = -7\) back into the expressions for \(y\) and \(z\): \[ y = 2(-7
+33	33	The answer is: \(\boxed{\begin{pmatrix} -7 \\ 16 \\ 5 \end{pmatrix}}\).
+34	34	To find the vector \(\mathbf{v}\) that satisfies the cross product equation \(\b
+35	35	The cross product of \(\begin{pmatrix} 1 \\ 2 \\ -5 \end{pmatrix}\) and \(\mathb
+36	36	Setting this equal to \(\begin{pmatrix} 90 \\ 30 \\ 30 \end{pmatrix}\), we get t
+37	37	Solve the third equation for \(y\): \[ y = 2x + 30. \]
+38	38	Substitute \(y = 2x + 30\) into the second equation: \[ -5x - z = 30 \implies z 
+39	39	Substitute \(y = 2x + 30\) and \(z = -5x - 30\) into the first equation: \[ 2(-5
+40	40	Now, we need to minimize the magnitude of \(\mathbf{v} = \begin{pmatrix} x \\ y 
+41	41	Expand and simplify the expression under the square root: \[ \|\mathbf{v}\|^2 = 
+42	42	To minimize \(\|\mathbf{v}\|^2\), we complete the square for the quadratic expre
+43	43	The minimum value of \((x + 7)^2\) is 0, which occurs when \(x = -7\).
+44	44	Substituting \(x = -7\) back into the expressions for \(y\) and \(z\): \[ y = 2(
+45	45	Thus, the vector \(\mathbf{v}\) that minimizes the magnitude is \(\begin{pmatrix
+46	46	The answer is: \(\begin{pmatrix} -7 \\ 16 \\ 5 \end{pmatrix}\).
+47	47	Let's denote the vector \(\mathbf{v}\) as \(\begin{pmatrix} x \\ y \\ z \end{pma
+48	48	The cross product \(\begin{pmatrix} 1 \\ 2 \\ -5 \end{pmatrix} \times \begin{pma
+49	49	Equate this to the given vector \(\begin{pmatrix} 90 \\ 30 \\ 30 \end{pmatrix}\)
+50	50	Solve the system of equations. Start with the third equation: \[ y - 2x = 30 \im
+51	51	Substitute \(y = 2x + 30\) into the first equation: \[ 2(2x + 30) + 5z = 90 \] \
+52	52	Substitute \(y = 2x + 30\) and \(z = \frac{30 - 4x}{5}\) into the second equatio
+53	53	Substitute \(x = -\frac{60}{7}\) back into the expressions for \(y\) and \(z\): 
+54	54	Therefore, the vector \(\mathbf{v}\) is: \[ \mathbf{v} = \begin{pmatrix} -\frac{
+55	55	To find the vector with the smallest magnitude, note that the above solution is 
+56	56	Calculate the magnitude of \(\mathbf{v}\): \[ \|\mathbf{v}\| = \sqrt{\left(-\fra
+57	57	Let \(\mathbf{v} = \begin{pmatrix} x \\ y \\ z \end{pmatrix}\). The cross produc
+58	58	Set this equal to \(\begin{pmatrix} 90 \\ 30 \\ 30 \end{pmatrix}\): \[ \begin{pm
+59	59	This gives us three equations: \[ 2z + 5y = 90 \quad \text{(1)} \] \[ -5x - z = 
+60	60	Solve these equations step by step. From equation (3), solve for \(x\): \[ x = 3
+61	61	Substitute \(x\) into equation (2): \[ -5(30 + 2y) - z = 30 \] \[ -150 - 10y - z
+62	62	Substitute \(z\) into equation (1): \[ 2(-180 - 10y) + 5y = 90 \] \[ -360 - 20y 
+63	63	Substitute \(y = -30\) back into the expressions for \(x\) and \(z\): \[ x = 30 
+64	64	Calculate the magnitude of \(\mathbf{v}\): \[ \|\mathbf{v}\| = \sqrt{(-30)^2 + (
+65	65	The answer is: \(\begin{pmatrix} -3 \\ -3 \\ 12 \end{pmatrix}\).
+66	66	Let \(\mathbf{v} = \begin{pmatrix} v_1 \\ v_2 \\ v_3 \end{pmatrix}\). The cross 
+67	67	Solve the system of equations. Start with the third equation: \[ v_2 = 30 + 2v_1
+68	68	To minimize the magnitude of \(\mathbf{v}\), we need to minimize \(\sqrt{v_1^2 +
+69	69	Recall that the cross product of two vectors \(\mathbf{a} \times \mathbf{b}\) re
+70	70	Let \(\mathbf{v} = \begin{pmatrix} x \\ y \\ z \end{pmatrix}\). The cross produc
+71	71	Solve the system of equations. Start with the third equation: \[ y = 2x + 30. \]
+72	72	Substitute \(y\) into the first equation: \[ 2z + 5(2x + 30) = 90, \] \[ 2z + 10
+73	73	Substitute \(y\) and \(z\) into the second equation: \[ 5x - (-5x - 30) = 30, \]
+74	74	With \(x = 0\), substitute back to find \(y\) and \(z\): \[ y = 2(0) + 30 = 30, 
+75	75	Thus, \(\mathbf{v} = \begin{pmatrix} 0 \\ 30 \\ -30 \end{pmatrix}\).
+76	76	Calculate the magnitude of \(\mathbf{v}\): \[ \|\mathbf{v}\| = \sqrt{0^2 + 30^2 
+77	77	Verify that no smaller magnitude solution exists. Any other solution would invol
+78	78	To find the vector \(\mathbf{v}\) that satisfies the given cross product equatio
+79	79	The cross product \(\begin{pmatrix} 1 \\ 2 \\ -5 \end{pmatrix} \times \mathbf{v}
+80	80	Setting this equal to \(\begin{pmatrix} 90 \\ 30 \\ 30 \end{pmatrix}\), we get t
+81	81	We solve these equations to express \(x\), \(y\), and \(z\) in terms of each oth
+82	82	Substitute \(y\) into the first equation: \[ 2z + 5(2x + 30) = 90 \implies 2z + 
+83	83	Now substitute \(z\) into the second equation: \[ -5x - (-5x - 30) = 30 \implies
+84	84	To minimize the magnitude of \(\mathbf{v}\), we need to minimize: \[ \|\mathbf{v
+85	85	Simplify the expression under the square root: \[ \|\mathbf{v}\|^2 = x^2 + (2x +
+86	86	Minimize the quadratic function \(30x^2 + 420x + 1800\). The minimum value of a 
+87	87	Substitute \(x = -7\) back into the expressions for \(y\) and \(z\): \[ y = 2(-7
+88	88	The answer is: \(\boxed{\begin{pmatrix} -7 \\ 16 \\ 5 \end{pmatrix}}\).

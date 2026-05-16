@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.env
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & Cache
+*.log
+*.cache
+.step_clustering_cache/
+batch_results/
+
+# 排除非千问的大模型目录
+glm-4-flash/
+glm-4-flashx/
+gpt-4o-min/
+DeepSeek-R1-Distill-Qwen-14B/
+DeepSeek-R1-Distill-Qwen-7B/
+
+# 实验结果输出目录（大JSON文件，禁止上传）
+**/results/
+**/pre_result/
+
+# 模型权重文件
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
