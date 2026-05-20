@@ -92,10 +92,11 @@ ACTION_PIPELINE: List[str] = ["expand", "exchange1", "exchange2","exchange_bidir
 #   1) REDUCTION_METHOD="pca",  EXCHANGE1_CLUSTER_METHOD="kmeans"   → 基线（原行为，KMeans k=7）
 #   2) REDUCTION_METHOD="umap", EXCHANGE1_CLUSTER_METHOD="hdbscan"  → 学术经典 UMAP+HDBSCAN（主推）
 #   3) REDUCTION_METHOD="umap", EXCHANGE1_CLUSTER_METHOD="kmeans"   → UMAP+KMeans 实验组（k 自动用 4）
-# 降维方法："pca" | "umap"
-REDUCTION_METHOD: str = "pca"
+#   4) REDUCTION_METHOD="pca_umap", … → L2→PCA(30)→UMAP(10)，KMeans k 探测逻辑同 umap
+# 降维方法："pca" | "umap" | "pca_umap"
+REDUCTION_METHOD: str = "pca_umap"
 # 聚类方法："kmeans" | "dbscan" | "hdbscan"
-EXCHANGE1_CLUSTER_METHOD = "hdbscan"
+EXCHANGE1_CLUSTER_METHOD = "kmeans"
 
 # ---------- expand 缓存快速通道 ----------
 # True（推荐）：执行 expand 前先尝试整题加载缓存的 agent_contexts；
@@ -109,7 +110,7 @@ EXPAND_USE_CACHE: bool = True
 # False：单题（沿用 CONFIG.fixed_question_id 为 None 时随机一题，否则固定 id）
 RUN_BATCH: bool = True
 # 非 None 时只跑这些 question_id（与数据集中类型一致即可，内部转 str 匹配）
-BATCH_QUESTION_IDS: Optional[List[Any]] = None
+BATCH_QUESTION_IDS: Optional[List[Any]] = [55]
 # BATCH_QUESTION_IDS: Optional[List[Any]] = None
 # 全表模式下最多跑多少题（None 表示不截断）；在 BATCH_QUESTION_IDS 为 None 时生效
 BATCH_MAX_QUESTIONS: Optional[int] = None
@@ -117,7 +118,7 @@ BATCH_MAX_QUESTIONS: Optional[int] = None
 # ---------- 日志详细度 ----------
 # 0 = 静默（仅关键摘要 + 累计正确率），1 = 全量日志（调试单题）
 # 批量时建议 0；单题调试时设 1
-BATCH_VERBOSE: int = 0
+BATCH_VERBOSE: int = 1
 
 # True：即使 BATCH_VERBOSE=0，仍在进入 exchange2 前打印 agent_contexts 摘要（便于批量时核对）
 PRINT_DEBUG_AGENT_CONTEXTS_BEFORE_EXCHANGE2: bool = False

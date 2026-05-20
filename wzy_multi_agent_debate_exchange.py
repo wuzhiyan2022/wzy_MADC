@@ -47,6 +47,7 @@ from wzy_multi_agent_debate_expand import (
 # 从聚类模块导入核心函数、配置常量及答案处理工具函数
 from wzy_multi_agent_debate_clustering import (
     _reduce_dimensions_pca,
+    _reduce_dimensions_pca_then_umap,
     _reduce_dimensions_umap,
     _cluster_kmeans,
     # [已注释] DBSCAN 已移除，改用 HDBSCAN 自动探测
@@ -77,7 +78,7 @@ from wzy_multi_agent_debate_clustering import (
 # 并发配置
 EXCHANGE_CONCURRENT_LIMIT = 3  # exchange 阶段每批并发的 agent 数量上限
 
-# 默认降维方法："pca" | "umap"
+# 默认降维方法："pca" | "umap" | "pca_umap"
 # 对外函数都会接收 reduction_method 形参，调用方未传时使用此默认值
 DEFAULT_REDUCTION_METHOD = "pca"
 
@@ -105,26 +106,26 @@ def _resolve_kmeans_k_with_hdbscan(vectors_reduced: np.ndarray, reduction_method
     基于 HDBSCAN 自动探测确定 KMeans 的 k 值。
 
     策略：
-    - 仅在 UMAP 降维后使用（UMAP 的非线性 embedding 更适合 HDBSCAN 探测）
-    - PCA 路径直接回退到固定值（线性投影不适合 HDBSCAN 自适应）
+    - 最终嵌入为 UMAP 空间时启用（``umap`` / ``pca_umap``）：非线性 embedding 更适合 HDBSCAN 探测
+    - 纯 PCA 路径回退到固定值（线性投影不适合 HDBSCAN 自适应）
     - HDBSCAN 噪声 < 50% 时，用 HDBSCAN 探测到的簇数作为 k
     - HDBSCAN 噪声 >= 50% 时，回退到固定值
     - k 值限制在 [KMEANS_K_MIN, KMEANS_K_MAX] 范围内
 
     Args:
         vectors_reduced: 降维后的向量矩阵
-        reduction_method: 降维方法："pca" | "umap"
+        reduction_method: 降维方法："pca" | "umap" | "pca_umap"
 
     Returns:
         KMeans 的 k 值
     """
-    if reduction_method != "umap":
-        # PCA 路径：直接回退到固定值
+    if reduction_method not in ("umap", "pca_umap"):
+        # 纯 PCA 路径：直接回退到固定值
         k = KMEANS_K_FALLBACK
         print(f"[KMeans K 选择] PCA 路径，回退到固定 k={k}")
         return k
 
-    # UMAP 路径：使用 HDBSCAN 探测
+    # UMAP 或 PCA→UMAP：使用 HDBSCAN 探测
     try:
         hdbscan_labels = _cluster_hdbscan(
             vectors_reduced,
@@ -164,8 +165,8 @@ def _resolve_kmeans_k_with_hdbscan(vectors_reduced: np.ndarray, reduction_method
 
 
 def _resolve_target_dim(reduction_method: str) -> int:
-    """根据降维方法选择目标维度。当前两种方法甜点都是 10，但保留分化口子。"""
-    if reduction_method == "umap":
+    """根据降维方法选择「交给聚类」的最终向量维度。"""
+    if reduction_method in ("umap", "pca_umap"):
         return UMAP_N_COMPONENTS
     return TARGET_DIM
 
@@ -682,7 +683,7 @@ async def run_exchange1_from_expand_outputs(
     会原地修改 agent_contexts（追加 user + assistant）。
 
     Args:
-        reduction_method: "pca" | "umap"
+        reduction_method: "pca" | "umap" | "pca_umap"
 
     Returns:
         {"majority_answer": str | None, "agent_contexts": list}
@@ -716,7 +717,7 @@ async def run_exchange2_from_exchange1_outputs(
     会原地修改 agent_contexts（再追加一轮 user + assistant）。
 
     Args:
-        reduction_method: "pca" | "umap"
+        reduction_method: "pca" | "umap" | "pca_umap"
 
     Returns:
         {"majority_answer": str | None, "agent_contexts": list}
@@ -765,7 +766,7 @@ async def run_exchange_bidirectional_1_from_expand_outputs(
     （correct 类簇全 True，wrong 类簇全 False）。
 
     Args:
-        reduction_method: "pca" | "umap"
+        reduction_method: "pca" | "umap" | "pca_umap"
     """
     await _run_single_cluster_exchange_round(
         step_vectors,
@@ -794,7 +795,7 @@ async def run_exchange_bidirectional_2_from_bidirectional_1_outputs(
     聚类后 Step 4 为双向标签修正。
 
     Args:
-        reduction_method: "pca" | "umap"
+        reduction_method: "pca" | "umap" | "pca_umap"
     """
     majority_answer, agent_results = expand_compute_majority_and_agent_results_from_latest(
         agent_contexts, cfg
@@ -876,10 +877,12 @@ async def _run_single_cluster_exchange_round(
         round_num: 当前轮次编号（仅用于日志标注）
         use_method: 聚类方法："kmeans" | "hdbscan"（DBSCAN 已移除）
         bidirectional: True 时 correct 类簇全置 True、wrong 类簇全置 False；False 时仅 correct 类簇置 True
-        reduction_method: 降维方法："pca" | "umap"
-            - pca  → 先 L2 → PCA → 再 L2（线性投影 + 单位球面）
-            - umap → UMAP（cosine metric 内置标度无关，前后默认不做 L2，保留 manifold）
-            KMeans 时 k 由 HDBSCAN 自动探测确定（仅 UMAP 路径），PCA 路径使用固定值
+        reduction_method: 降维方法："pca" | "umap" | "pca_umap"
+            - pca      → 先 L2 → PCA → 再 L2（线性投影 + 单位球面）
+            - umap     → UMAP（cosine metric 内置标度无关，前后默认不做 L2，保留 manifold）
+            - pca_umap → L2 → PCA（中间维见 clustering.PCA_UMAP_INTERMEDIATE_DIM）→ UMAP 至 UMAP_N_COMPONENTS；
+                         最终空间同 umap，KMeans 时 k 由 HDBSCAN 探测（与 umap 一致）
+            KMeans 时 k 由 HDBSCAN 自动探测确定（umap / pca_umap），纯 PCA 路径使用固定值
     """
     tag = (
         f"Bidirectional Exchange Round {round_num}"
@@ -888,10 +891,12 @@ async def _run_single_cluster_exchange_round(
     )
 
     # ══════════════════════════════════════════════════════════
-    # Step 1: 降维（PCA + L2 / UMAP）
+    # Step 1: 降维（PCA + L2 / UMAP / PCA→UMAP）
     # ══════════════════════════════════════════════════════════
     if reduction_method == "umap":
         step1_title = "UMAP 降维"
+    elif reduction_method == "pca_umap":
+        step1_title = "PCA→UMAP 两阶段降维（L2 + PCA → UMAP）"
     else:
         step1_title = "PCA 降维 + L2 归一化"
     print(f"\n{'═'*80}")
@@ -903,6 +908,17 @@ async def _run_single_cluster_exchange_round(
 
     if reduction_method == "umap":
         vectors_reduced = _reduce_dimensions_umap(step_vectors, target_dim=target_dim_eff)
+        if UMAP_POST_L2:
+            norms = np.linalg.norm(vectors_reduced, axis=1, keepdims=True)
+            vectors_reduced = vectors_reduced / (norms + 1e-12)
+            print(f"    UMAP 后 L2 归一化完成（UMAP_POST_L2=True）")
+        else:
+            print(f"    UMAP 后不做 L2（保留 UMAP manifold 几何，UMAP_POST_L2=False）")
+    elif reduction_method == "pca_umap":
+        # 最终嵌入与纯 UMAP 同属非线性 manifold：后处理对齐 UMAP_POST_L2，不复用 PCA 路径的强制 L2
+        vectors_reduced = _reduce_dimensions_pca_then_umap(
+            step_vectors, umap_dim=target_dim_eff
+        )
         if UMAP_POST_L2:
             norms = np.linalg.norm(vectors_reduced, axis=1, keepdims=True)
             vectors_reduced = vectors_reduced / (norms + 1e-12)
@@ -935,7 +951,7 @@ async def _run_single_cluster_exchange_round(
             metric=HDBSCAN_METRIC,
         )
     else:
-        # KMeans: 使用 HDBSCAN 自动探测确定 k 值（仅 UMAP 路径有效）
+        # KMeans: 使用 HDBSCAN 自动探测确定 k 值（umap / pca_umap 路径有效）
         kmeans_k = _resolve_kmeans_k_with_hdbscan(vectors_reduced, reduction_method)
         print(f"    参数: n_clusters={kmeans_k}（reduction_method={reduction_method}）")
         cluster_labels_raw = _cluster_kmeans(vectors_reduced, n_clusters=kmeans_k)

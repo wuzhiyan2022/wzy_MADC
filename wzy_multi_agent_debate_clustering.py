@@ -75,6 +75,8 @@ except ImportError:
 # 配置
 MAJORITY_THRESHOLD = 0.6   # 聚类中多数投票的阈值：正确/错误占比 >= 60% 时生效
 TARGET_DIM = 15            # PCA 降维目标维度（针对 LLM 句向量聚类的甜点：5~15 维）
+# 「PCA→UMAP」两阶段路径专用：第一阶段 PCA 的中间维（先去噪线性压缩，再交给 UMAP）
+PCA_UMAP_INTERMEDIATE_DIM = 30
 # [已注释] DBSCAN 聚类方式已移除，改用 HDBSCAN 自动探测
 # DBSCAN_EPS = 0.9          # DBSCAN 的 eps 参数
 # DBSCAN_MIN_SAMPLES = 2    # DBSCAN 的 min_samples 参数
@@ -288,7 +290,7 @@ def _reduce_dimensions_umap(
     if not UMAP_AVAILABLE:
         raise ImportError(
             "UMAP 未安装：请运行 'pip install umap-learn'；"
-            "或将 REDUCTION_METHOD 改回 'pca'"
+            "或将 REDUCTION_METHOD 改回 'pca'（不含 UMAP 的路径）"
         )
 
     n_samples = vectors.shape[0]
@@ -328,6 +330,37 @@ def _reduce_dimensions_umap(
         f"metric={metric}, pre_l2={pre_l2})"
     )
     return reduced
+
+
+def _reduce_dimensions_pca_then_umap(
+    vectors: np.ndarray,
+    *,
+    pca_dim: int = PCA_UMAP_INTERMEDIATE_DIM,
+    umap_dim: int = UMAP_N_COMPONENTS,
+) -> np.ndarray:
+    """
+    两阶段降维：L2 + PCA（线性去噪/压缩）→ UMAP（非线性流形嵌入）。
+
+    与单独 PCA / 单独 UMAP 的关系：
+      - 第一阶段复用 ``_reduce_dimensions_pca``：已在 PCA 前做 L2，且不使用 StandardScaler，
+        保持 LLM 句向量在余弦几何下的语义主轴。
+      - 第二阶段将 PCA 坐标作为 UMAP 输入；在高维上直接跑 UMAP 往往更慢且更易受噪声影响，
+        先用 PCA 压到 ``pca_dim`` 通常能减轻计算并稳定邻域图。
+      - UMAP 的超参数沿用模块级常量（``UMAP_N_NEIGHBORS``、``UMAP_MIN_DIST`` 等），
+        ``pre_l2`` 默认 False：metric=cosine 时已对标量长度不敏感；PCA 输出也不必强制再 L2。
+
+    Args:
+        vectors: 原始向量矩阵，形状 (N, dim)
+        pca_dim: PCA 阶段目标维（实际维数会被收缩为 min(pca_dim, N-1, dim)）
+        umap_dim: UMAP 阶段目标维（实际维数见 ``_reduce_dimensions_umap`` 内收缩逻辑）
+
+    Returns:
+        形状 (N, umap_eff) 的降维矩阵；依赖 ``umap-learn``。
+    """
+    # ── 阶段一：与纯 PCA 路径共享同一套 L2→PCA 实现（含小样本维数收缩）
+    vecs_pca = _reduce_dimensions_pca(vectors, target_dim=pca_dim)
+    # ── 阶段二：在 PCA 坐标上做 UMAP；输入维已降至 vecs_pca.shape[1]，显著快于原始高维
+    return _reduce_dimensions_umap(vecs_pca, target_dim=umap_dim)
 
 
 def _select_k_by_silhouette(vectors: np.ndarray) -> tuple[int, np.ndarray]:

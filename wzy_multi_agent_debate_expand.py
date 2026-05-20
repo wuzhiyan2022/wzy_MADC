@@ -94,10 +94,10 @@ IS_MATH = True
 # ================================
 
 API_URL = "https://api.zhizengzeng.com/v1"
-API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
+API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
 # glm-4-flashx gpt-4o-mini
-MODEL_NAME = "qwen-turbo"
-MODEL_TAG = "qwen-turbo"
+MODEL_NAME = "gpt-4o-mini"
+MODEL_TAG = "gpt-4o-mini"
 # MODEL_NAME = "qwen2.5-7b-instruct"
 # MODEL_TAG = "qwen2.5-7b-instruct"
 
