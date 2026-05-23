@@ -11,8 +11,8 @@ from common.math_equivalence import strip_string
 # API configuration - please set your own API endpoint and key
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
-MODEL_NAME = "gpt-4o-mini"
-MODEL_TAG = "gpt-4o-mini"
+MODEL_NAME = "qwen2.5-7b-instruct"
+MODEL_TAG = "qwen2.5-7b-instruct"
 
 # eval_bbh：每个阶段是否打印每道题的 majority_answer（与 compute_accuracy 返回的 pred_answer 一致）
 PRINT_MAJORITY_PER_QUESTION = True
@@ -657,7 +657,7 @@ if __name__ == "__main__":
         # "debate_zy_glm-4-flashx_10_1_exchange1_agent_com0_False",
         # "debate_zy_glm-4-flashx_10_1_exchange2_agent_com0_False",
         # "debate_zy_glm-4-flashx_10_1_exchange_bidirectional_1_agent_com0_False",
-        "debate_zy_gpt-4o-mini_10_1_expand_agent_com0_False",
+        "debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False",
     ]
     for file_name in file_names:
         print(f"\n{'='*60}")

@@ -72,7 +72,6 @@ from wzy_multi_agent_debate_clustering import (
     extract_answer_from_text,
     is_correct_answer,
     get_majority_answer_from_latest,
-    IS_MATH,
 )
 
 # 并发配置
@@ -611,7 +610,12 @@ async def _run_exchange(agent_contexts: list, agent_prompts: list) -> list:
 # ============================================================
 
 
-def _print_exchange_round_results(agent_contexts: list, round_num: int):
+def _print_exchange_round_results(
+    agent_contexts: list,
+    round_num: int,
+    *,
+    is_math: bool,
+):
     """聚类+exchange 调用完成后：打印 Step 8–10；返回本轮 majority_answer。"""
     _round_tag = f"Exchange Round {round_num}"
     print(f"\n{'═'*80}")
@@ -630,7 +634,7 @@ def _print_exchange_round_results(agent_contexts: list, round_num: int):
         print(f"  {_corner}{_h*70}")
     print(f"{'═'*80}")
 
-    _round_majority = _get_latest_exchange_majority(agent_contexts)
+    _round_majority = _get_latest_exchange_majority(agent_contexts, is_math=is_math)
     _n_agents = len(agent_contexts)
 
     print(f"\n{'═'*80}")
@@ -639,7 +643,7 @@ def _print_exchange_round_results(agent_contexts: list, round_num: int):
     _extracted_answers = []
     for _aidx, _ctx in enumerate(agent_contexts):
         _resp = _ctx[-1].get("content", "") if _ctx else ""
-        _ans = extract_answer_from_text(_resp, is_math=IS_MATH)
+        _ans = extract_answer_from_text(_resp, is_math=is_math)
         _extracted_answers.append(_ans)
         print(f"    Agent {_aidx}: 提取答案 = {_ans}")
     print(f"\n  {'─'*70}")
@@ -654,13 +658,13 @@ def _print_exchange_round_results(agent_contexts: list, round_num: int):
     print(f"{'═'*80}")
     for _aidx, _ans in enumerate(_extracted_answers):
         _ans_disp = _ans if _ans is not None else "(未提取到)"
-        _ok = is_correct_answer(_ans, _round_majority, is_math=IS_MATH) if _ans else False
+        _ok = is_correct_answer(_ans, _round_majority, is_math=is_math) if _ans else False
         _mark = "[正确]" if _ok else "[错误]"
         print(f"    Agent {_aidx}: 答案={_ans_disp}, 与 majority_answer={_round_majority} 对比 → {_mark}")
     _round_maj_cnt = sum(
         1
         for _ans in _extracted_answers
-        if _ans and is_correct_answer(_ans, _round_majority, is_math=IS_MATH)
+        if _ans and is_correct_answer(_ans, _round_majority, is_math=is_math)
     )
     print(f"\n    与 majority_answer 一致的 agent 数: {_round_maj_cnt}/{_n_agents}")
     print(f"{'═'*80}")
@@ -672,6 +676,7 @@ async def run_exchange1_from_expand_outputs(
     step_indices: list,
     all_steps: list,
     agent_contexts: list,
+    cfg: ExpandConfig,
     *,
     use_method: str = "kmeans",
     round_num: int = 1,
@@ -698,7 +703,7 @@ async def run_exchange1_from_expand_outputs(
         bidirectional=False,
         reduction_method=reduction_method,
     )
-    maj = _print_exchange_round_results(agent_contexts, round_num)
+    maj = _print_exchange_round_results(agent_contexts, round_num, is_math=cfg.is_math)
     return {"majority_answer": maj, "agent_contexts": agent_contexts}
 
 
@@ -747,7 +752,7 @@ async def run_exchange2_from_exchange1_outputs(
         bidirectional=False,
         reduction_method=reduction_method,
     )
-    maj = _print_exchange_round_results(agent_contexts, round_num)
+    maj = _print_exchange_round_results(agent_contexts, round_num, is_math=cfg.is_math)
     return {"majority_answer": maj, "agent_contexts": agent_contexts}
 
 
@@ -756,6 +761,7 @@ async def run_exchange_bidirectional_1_from_expand_outputs(
     step_indices: list,
     all_steps: list,
     agent_contexts: list,
+    cfg: ExpandConfig,
     *,
     use_method: str = "kmeans",
     round_num: int = 1,
@@ -778,7 +784,7 @@ async def run_exchange_bidirectional_1_from_expand_outputs(
         bidirectional=True,
         reduction_method=reduction_method,
     )
-    maj = _print_exchange_round_results(agent_contexts, round_num)
+    maj = _print_exchange_round_results(agent_contexts, round_num, is_math=cfg.is_math)
     return {"majority_answer": maj, "agent_contexts": agent_contexts}
 
 
@@ -824,7 +830,7 @@ async def run_exchange_bidirectional_2_from_bidirectional_1_outputs(
         bidirectional=True,
         reduction_method=reduction_method,
     )
-    maj = _print_exchange_round_results(agent_contexts, round_num)
+    maj = _print_exchange_round_results(agent_contexts, round_num, is_math=cfg.is_math)
     return {"majority_answer": maj, "agent_contexts": agent_contexts}
 
 
@@ -832,7 +838,7 @@ async def run_exchange_bidirectional_2_from_bidirectional_1_outputs(
 # 辅助：获取最新一轮 exchange 的多数答案（轮次无关版本）
 # ============================================================
 
-def _get_latest_exchange_majority(agent_contexts: list):
+def _get_latest_exchange_majority(agent_contexts: list, *, is_math: bool):
     """
     获取最新一轮 exchange 后的多数答案。
 
@@ -841,11 +847,12 @@ def _get_latest_exchange_majority(agent_contexts: list):
 
     Args:
         agent_contexts: 所有 agent 的对话上下文列表
+        is_math: 与 ExpandConfig.is_math / eval_all_round.compute_accuracy 一致
 
     Returns:
         str or None: 多数答案，若无有效答案则返回 None
     """
-    return get_majority_answer_from_latest(agent_contexts, is_math=IS_MATH)
+    return get_majority_answer_from_latest(agent_contexts, is_math=is_math)
 
 
 # ============================================================

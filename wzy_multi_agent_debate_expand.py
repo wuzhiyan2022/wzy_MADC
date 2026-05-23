@@ -96,10 +96,10 @@ IS_MATH = True
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
 # glm-4-flashx gpt-4o-mini
-MODEL_NAME = "gpt-4o-mini"
-MODEL_TAG = "gpt-4o-mini"
-# MODEL_NAME = "qwen2.5-7b-instruct"
-# MODEL_TAG = "qwen2.5-7b-instruct"
+# MODEL_NAME = "gpt-4o-mini"
+# MODEL_TAG = "gpt-4o-mini"
+MODEL_NAME = "qwen2.5-3b-instruct"
+MODEL_TAG = "qwen2.5-3b-instruct"
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY)
 async_client = AsyncOpenAI(base_url=API_URL, api_key=API_KEY)
