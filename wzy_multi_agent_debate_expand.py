@@ -86,11 +86,11 @@ VERIFY_VECTORIZATION = True
 # 调试：设为 True 时（且 VERIFY_VECTORIZATION 为 True）将向量保存到文件
 SAVE_DEBUG_FILES = True
 # 数据集与 prompt 配置
-task_name = "math_500_id"
+task_name = "geometric_shapes_id"
 agent_com_name = "agent_com0"
 is_hard = False
 # IS_MATH: math_500_id 等数学数据集设为 True；BBH 选项格式任务设为 False
-IS_MATH = True
+IS_MATH = False
 # ================================
 
 API_URL = "https://api.zhizengzeng.com/v1"
@@ -98,8 +98,8 @@ API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
 # glm-4-flashx gpt-4o-mini
 # MODEL_NAME = "gpt-4o-mini"
 # MODEL_TAG = "gpt-4o-mini"
-MODEL_NAME = "qwen2.5-3b-instruct"
-MODEL_TAG = "qwen2.5-3b-instruct"
+MODEL_NAME = "qwen-turbo"
+MODEL_TAG = "qwen-turbo"
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY)
 async_client = AsyncOpenAI(base_url=API_URL, api_key=API_KEY)
@@ -863,59 +863,50 @@ def expand_print_step6_all_steps(all_steps: List[Dict[str, Any]], num_agents: in
     print(f"    各 agent 贡献 step 数: {dict(sorted(_agent_step_counts.items()))}")
     print(f"{'═'*80}")
 
-# 修改前embedding的方式
-# def expand_run_embedding(
-#     all_steps: List[Dict[str, Any]],
-#     cfg: ExpandConfig,
-# ) -> Tuple[Optional[np.ndarray], Optional[List[int]]]:
-#     """对展平后的 step 列表做 Embedding API 向量化。
-
-#     每道题内各 agent 的 step 均针对同一题干，故仅对 step 正文向量化，不拼接题干前缀，
-#     以降低 token 与缓存 key 歧义（缓存键仅依赖 step 文本本身）。
-#     """
-#     print(f"\n{'═'*80}")
-#     print("  [Expand Step 7] 步骤向量化 (Embedding)")
-#     print(f"{'═'*80}")
-
-#     step_vectors = None
-#     step_indices = None
-#     if len(all_steps) >= 2:
-#         try:
-#             from wzy_step_clustering import StepClusteringRefiner
-
-#             refiner = StepClusteringRefiner(
-#                 api_url=cfg.api_url,
-#                 api_key=cfg.api_key,
-#                 vector_method="embedding_api",
-#                 embedding_model=cfg.embedding_model,
-#                 reduce_dim=False,
-#                 batch_size=20,
-#             )
-#             print("\n[向量化] 仅使用各 step 的 content 文本（不注入题干前缀）")
-#             step_vectors, step_indices = refiner.vectorize_steps(all_steps)
-#             if step_vectors is not None and step_vectors.shape[0] > 0:
-#                 print(
-#                     f"\n[向量化] 完成: {step_vectors.shape[0]} 个步骤 -> "
-#                     f"{step_vectors.shape[1]} 维向量 (模型: {cfg.embedding_model})"
-#                 )
-#             else:
-#                 print("\n[向量化] 失败或无可向量化步骤")
-#         except Exception as e:
-#             print(f"\n[向量化] 异常: {e}")
-#             import traceback
-#             traceback.print_exc()
-#     else:
-#         print(f"\n[向量化] 跳过: 步骤数 {len(all_steps)} < 2，无法进行向量化")
-#     print(f"{'═'*80}")
-#     return step_vectors, step_indices
-
-# 修改后embedding的方式
-from wzy_context_step_vectorization import expand_run_embedding_contextual
 def expand_run_embedding(
     all_steps: List[Dict[str, Any]],
     cfg: ExpandConfig,
 ) -> Tuple[Optional[np.ndarray], Optional[List[int]]]:
-    return expand_run_embedding_contextual(all_steps, cfg)
+    """对展平后的 step 列表做 Embedding API 向量化。
+
+    每道题内各 agent 的 step 均针对同一题干，故仅对 step 正文向量化，不拼接题干前缀，
+    以降低 token 与缓存 key 歧义（缓存键仅依赖 step 文本本身）。
+    """
+    print(f"\n{'═'*80}")
+    print("  [Expand Step 7] 步骤向量化 (Embedding)")
+    print(f"{'═'*80}")
+
+    step_vectors = None
+    step_indices = None
+    if len(all_steps) >= 2:
+        try:
+            from wzy_step_clustering import StepClusteringRefiner
+
+            refiner = StepClusteringRefiner(
+                api_url=cfg.api_url,
+                api_key=cfg.api_key,
+                vector_method="embedding_api",
+                embedding_model=cfg.embedding_model,
+                reduce_dim=False,
+                batch_size=20,
+            )
+            print("\n[向量化] 仅使用各 step 的 content 文本（不注入题干前缀）")
+            step_vectors, step_indices = refiner.vectorize_steps(all_steps)
+            if step_vectors is not None and step_vectors.shape[0] > 0:
+                print(
+                    f"\n[向量化] 完成: {step_vectors.shape[0]} 个步骤 -> "
+                    f"{step_vectors.shape[1]} 维向量 (模型: {cfg.embedding_model})"
+                )
+            else:
+                print("\n[向量化] 失败或无可向量化步骤")
+        except Exception as e:
+            print(f"\n[向量化] 异常: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"\n[向量化] 跳过: 步骤数 {len(all_steps)} < 2，无法进行向量化")
+    print(f"{'═'*80}")
+    return step_vectors, step_indices
 
 
 def try_load_full_expand_cache(

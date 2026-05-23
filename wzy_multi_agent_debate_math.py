@@ -94,7 +94,7 @@ ACTION_PIPELINE: List[str] = ["expand", "exchange1", "exchange2","exchange_bidir
 #   3) REDUCTION_METHOD="umap", EXCHANGE1_CLUSTER_METHOD="kmeans"   → UMAP+KMeans 实验组（k 自动用 4）
 #   4) REDUCTION_METHOD="pca_umap", … → L2→PCA(30)→UMAP(10)，KMeans k 探测逻辑同 umap
 # 降维方法："pca" | "umap" | "pca_umap"
-REDUCTION_METHOD: str = "pca"
+REDUCTION_METHOD: str = "umap"
 # 聚类方法："kmeans" | "dbscan" | "hdbscan"
 EXCHANGE1_CLUSTER_METHOD = "kmeans"
 
