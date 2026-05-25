@@ -11,8 +11,8 @@ from common.math_equivalence import strip_string
 # API configuration - please set your own API endpoint and key
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
-MODEL_NAME = "qwen2.5-7b-instruct"
-MODEL_TAG = "qwen2.5-7b-instruct"
+MODEL_NAME = "qwen-turbo"
+MODEL_TAG = "qwen-turbo"
 
 # eval_bbh：每个阶段是否打印每道题的 majority_answer（与 compute_accuracy 返回的 pred_answer 一致）
 PRINT_MAJORITY_PER_QUESTION = True
@@ -124,6 +124,56 @@ def parse_answer(input_str):
             break
 
     return solution
+
+
+def parse_answer_bbh(input_str: str):
+    """从模型回复中提取 BBH 选择题答案，统一返回 (X) 格式（与 GT 一致）。
+
+    按优先级依次尝试，均取文本中最后一次匹配：
+      1. 已带括号格式 (X)          — 原 parse_answer 逻辑，最可靠
+      2. "The answer is: X" 系列   — 冒号可选，字母前后括号可选
+      3. "Answer: X" 简短声明格式
+    所有分支均返回 "(X)" 格式或 None，与数据集 target 字段格式完全一致。
+
+    关于字面 "(X)" / "X" 占位符的过滤：
+      prompt 中常含 "Put your answer in the form (X) at the end of your response."，
+      模型有时不替换字母而直接照抄字面 "(X)"。BBH 数据集实际选项几乎不会用到 X，
+      故每一层都剔除字面 "X"：
+        - 若过滤后仍有"真选项"，按"最后一次匹配"取真选项；
+        - 若该层只剩占位符，继续往下层走，让 "The answer is: <letter>" 等
+          更可靠的显式陈述获得发言权；
+        - 若三层都只剩占位符，返回 None（交给下游 solve_math_problems / parse_YN
+          兜底，最差返回 None 不计入投票，仍优于直接误判成 "(X)"）。
+    """
+    if not input_str:
+        return None
+
+    # 1. 已有括号格式 (X)，与原 parse_answer 完全一致，取最后一个；剔除字面占位符 (X)
+    matches = re.findall(r'\([A-Z]\)', input_str)
+    non_placeholder = [m for m in matches if m != "(X)"]
+    if non_placeholder:
+        return non_placeholder[-1]
+
+    # 2. "The answer is X" / "The answer is: X"（冒号可选，字母前后括号可选，后跟标点/空白）
+    #    末尾补空格确保回复末尾的字母也能命中
+    matches = re.findall(
+        r'[Tt]he\s+answer\s+is\s*[：:]?\s*\(?([A-Z])\)?[\s\.,。]',
+        input_str + " ",
+    )
+    non_placeholder = [m for m in matches if m != "X"]
+    if non_placeholder:
+        return f"({non_placeholder[-1]})"
+
+    # 3. "Answer: X" 简短声明格式
+    matches = re.findall(
+        r'[Aa]nswer\s*[：:]\s*\(?([A-Z])\)?[\s\.,。]',
+        input_str + " ",
+    )
+    non_placeholder = [m for m in matches if m != "X"]
+    if non_placeholder:
+        return f"({non_placeholder[-1]})"
+
+    return None
 
 def parse_math_anser(input_str):
     # 正则匹配 \boxed{...}，可以正确匹配如下的内容
@@ -247,7 +297,7 @@ def compute_accuracy(gt, pred_solutions, log=False, idx=0, is_math=False):
             pred_answers = []
 
             for pred_solution in pred_solutions:
-                pred_answer = parse_answer(pred_solution)
+                pred_answer = parse_answer_bbh(pred_solution)
                 if pred_answer is None:
                     pred_answer = solve_math_problems(pred_solution)
                 if pred_answer is None:
@@ -258,7 +308,7 @@ def compute_accuracy(gt, pred_solutions, log=False, idx=0, is_math=False):
                 return 0, None
             pred_answer = most_frequent(pred_answers)
         else:
-            pred_answer = parse_answer(pred_solutions)
+            pred_answer = parse_answer_bbh(pred_solutions)
             if pred_answer is None:
                 pred_answer = solve_math_problems(pred_solutions)
         if gt == pred_answer:
@@ -277,7 +327,7 @@ def extract_agent_answers_from_solutions(pred_solutions: list, is_math: bool) ->
         if is_math:
             out.append(_extract_math_answer(pred_solution))
         else:
-            pred_answer = parse_answer(pred_solution)
+            pred_answer = parse_answer_bbh(pred_solution)
             if pred_answer is None:
                 pred_answer = solve_math_problems(pred_solution)
             if pred_answer is None:
@@ -534,7 +584,7 @@ def extract_bbh(file_name, is_math=False):
                         pred_answers.append(strip_string(pred_answer))
             else:
                 for pred_solution in pred_solutions:
-                    pred_answer = parse_answer(pred_solution)
+                    pred_answer = parse_answer_bbh(pred_solution)
 
                     if pred_answer is None:
                         pred_answer = solve_math_problems(pred_solution)
@@ -644,7 +694,7 @@ if __name__ == "__main__":
     # MODEL_NAME = "gpt-4o-mini"
     # model_names = ["gpt-4o-mini", "qwen2.5-7b-instruct", "qwen2.5-3b-instruct", "glm-4-flashx", "glm-4-flash", "qwen-turbo", "qwen-plus"]
 
-    task_name = "math_500_id"
+    task_name = "geometric_shapes_id"
     result_path = f"{MODEL_NAME}/results/debate_zy/{task_name}"
 
     # file_names = [
@@ -657,10 +707,10 @@ if __name__ == "__main__":
         # "debate_zy_glm-4-flashx_10_1_exchange1_agent_com0_False",
         # "debate_zy_glm-4-flashx_10_1_exchange2_agent_com0_False",
         # "debate_zy_glm-4-flashx_10_1_exchange_bidirectional_1_agent_com0_False",
-        "debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False",
+        "debate_zy_qwen-turbo_10_1_expand_agent_com0_False",
     ]
     for file_name in file_names:
         print(f"\n{'='*60}")
         print(f"  {file_name}")
         print(f"{'='*60}")
-        eval_bbh(file_name, is_math=True)
+        eval_bbh(file_name, is_math=False)

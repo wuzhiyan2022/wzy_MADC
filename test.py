@@ -6,6 +6,8 @@
 用法：在下方「可配置项」里改 QUESTION_ID、DEBATE_DIR、DEBATE_JSON_FILE，然后运行:
   python test.py
 
+QUESTION_ID 可填单个题号（如 1）或列表（如 [1, 5, 10]），一次打印多题时按列表顺序依次输出。
+
 默认结果目录为 qwen2.5-7b-instruct/results/debate（与 debate_bbh 一致）。
 若读取 wzy 管线产物，文件在 results/debate_zy/... 下：请在下方设置
 DEBATE_DIR = "qwen2.5-7b-instruct/results/debate_zy"，或让 DEBATE_JSON_FILE 使用
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+import textwrap
 from pathlib import Path
 
 # 本脚本所在目录 = 项目根（与 qwen2.5-7b-instruct 等文件夹同级）
@@ -46,25 +49,24 @@ def _rel_display(base: Path, p: Path) -> str:
 
 
 # ---------- 可配置项（改这里即可）----------
-COUNT_ONLY = True  # True：仅统计文件中的题目数量并退出，不打印具体内容
+COUNT_ONLY = False  # True：仅统计文件中的题目数量并退出，不打印具体内容
 
-QUESTION_ID = 486
+QUESTION_ID: int | str | list[int | str] = [75,76,86,120,124,133,140,142,185,188,205,216,233]  # 单题填 1；多题填 [1, 5, 10]
 
 # 目录里只有一个 .json 时可填 None，会自动选用该文件；
 # 若有多个 .json，请填写完整文件名，例如:
-# "debate_qwen2.5-7b-instruct_10_3_expand_exchangeI41_exchangeI41_agent_com0_False.json"
-# D:\AAAI2026-MADC-main - test-one-question\qwen2.5-7b-instruct\results\debate_zy\math_500_id\debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False.json
-DEBATE_JSON_FILE = "debate_zy_qwen-turbo_10_1_expand_agent_com0_False.json"
+# "debate_zy_qwen-turbo_10_1_exchange2_agent_com0_False.json"
+DEBATE_JSON_FILE = "debate_zy_qwen-turbo_10_1_exchange2_agent_com0_False.json"
 
 # 结果 JSON 根目录。None 时：若 DEBATE_JSON_FILE 名以 debate_zy 开头则用 results/debate_zy，否则用 results/debate
 # 也可显式写: "qwen2.5-7b-instruct/results/debate_zy"
-DEBATE_DIR: str | Path | None = "qwen-turbo/results/debate_zy/math_500_id"
+DEBATE_DIR: str | Path | None = "qwen-turbo/results/debate_zy/geometric_shapes_id"
 
 # 题库 JSON：填 None 则用「仓库根/qwen2.5-7b-instruct/data/math_500_id.json」
-MATH_ID_JSON: str | Path | None = None
+MATH_ID_JSON: str | Path | None = "qwen-turbo/data/geometric_shapes_id.json"
 
 # True：在按 agent 打印之后，再输出本题在 JSON 中的整条记录（json缩进，易读）
-PRETTY_PRINT_QUESTION_ENTRY = True
+PRETTY_PRINT_QUESTION_ENTRY = False
 
 # True：额外把整个 debate 文件用缩进打印（题很多时会非常长，一般保持 False）
 PRETTY_PRINT_ENTIRE_FILE = False
@@ -107,6 +109,15 @@ def resolve_debate_question_key(debate_data: dict, meta: dict) -> tuple[str | No
     return None, ""
 
 
+def normalize_question_ids(question_ids: int | str | list[int | str]) -> list[str]:
+    """将 QUESTION_ID 规范化为字符串列表，支持单值或列表。"""
+    if isinstance(question_ids, (list, tuple)):
+        if not question_ids:
+            raise ValueError("QUESTION_ID 列表不能为空")
+        return [str(qid) for qid in question_ids]
+    return [str(question_ids)]
+
+
 def load_example_by_question_id(math_json_path: Path, question_id: str) -> dict | None:
     with math_json_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -143,11 +154,24 @@ def unwrap_debate_value(raw):
 
 
 def _print_block(title: str, subtitle: str, content: str, line_prefix: str = "  |  ") -> None:
+    """打印单个 agent 在某阶段的回复块，超长行自动软折行以保证可读性。"""
     head = f"  --- {title} | {subtitle}"
     print("\n" + head + " " + "-" * max(0, 72 - len(head)))
     text = content if content else "(空)"
+    # 可用于实际文字的列宽（去掉行前缀后剩余）
+    wrap_width = 100
     for line in text.split("\n"):
-        print(f"{line_prefix}{line}")
+        if not line:
+            # 空行原样保留（段落间距）
+            print(line_prefix)
+        elif len(line) <= wrap_width:
+            print(f"{line_prefix}{line}")
+        else:
+            # 超长行按 wrap_width 软折行，续行对齐到前缀
+            wrapped = textwrap.wrap(line, width=wrap_width,
+                                    subsequent_indent=" " * len(line_prefix))
+            for wl in wrapped:
+                print(f"{line_prefix}{wl}")
     print("  " + "-" * 74)
 
 
@@ -349,22 +373,31 @@ def main() -> None:
         _REPO_ROOT / "qwen2.5-7b-instruct" / "data" / "math_500_id.json",
     )
 
-    ex = load_example_by_question_id(math_json, str(QUESTION_ID))
-    if ex is None:
-        print(f"[错误] 在 {math_json} 中未找到 question_id={QUESTION_ID!r}")
-        raise SystemExit(1)
+    question_ids = normalize_question_ids(QUESTION_ID)
+    print(f"\n[计划] 将依次打印 {len(question_ids)} 道题: {', '.join(question_ids)}")
 
-    question_key, key_kind = resolve_debate_question_key(debate_data, ex)
-    if question_key:
-        print(f"[匹配键] {key_kind}")
+    for idx, qid in enumerate(question_ids, start=1):
+        if len(question_ids) > 1:
+            print("\n" + "#" * 80)
+            print(f"# 题目进度 {idx}/{len(question_ids)}  question_id={qid}")
+            print("#" * 80)
 
-    print_agents_for_question(debate_data, question_key, ex)
+        ex = load_example_by_question_id(math_json, qid)
+        if ex is None:
+            print(f"[错误] 在 {math_json} 中未找到 question_id={qid!r}")
+            continue
 
-    if PRETTY_PRINT_QUESTION_ENTRY and question_key and question_key in debate_data:
-        dump_json_readable(
-            debate_data[question_key],
-            f"本题在 JSON 中的原始条目（缩进显示，question_id={QUESTION_ID}）",
-        )
+        question_key, key_kind = resolve_debate_question_key(debate_data, ex)
+        if question_key:
+            print(f"[匹配键] {key_kind}")
+
+        print_agents_for_question(debate_data, question_key, ex)
+
+        if PRETTY_PRINT_QUESTION_ENTRY and question_key and question_key in debate_data:
+            dump_json_readable(
+                debate_data[question_key],
+                f"本题在 JSON 中的原始条目（缩进显示，question_id={qid}）",
+            )
 
     if PRETTY_PRINT_ENTIRE_FILE:
         dump_json_readable(debate_data, "完整 debate 文件内容（缩进显示）")

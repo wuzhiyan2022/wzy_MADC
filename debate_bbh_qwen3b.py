@@ -24,8 +24,8 @@ API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
 # MODEL_NAME = "qwen2.5-7b-instruct"
 # MODEL_TAG = "qwen2.5-7b-instruct"
-MODEL_NAME = "glm-4-flashx"
-MODEL_TAG = "glm-4-flashx"
+MODEL_NAME = "qwen_turbo"
+MODEL_TAG = "qwen_turbo"
 client = OpenAI(base_url=API_URL,
                        api_key=API_KEY,
                        )
@@ -1120,7 +1120,7 @@ async def main(agents,rounds,actions):
     fewshot_ost_config = read_json("prompt/fewshot_ost_config.json")
     fewshot_ost_prompt = read_txt("prompt/fewshot_ost_prompt.txt")
     # debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False.json
-    expand_cache_path = r"glm-4-flashx\results\debate_zy\math_500_id\debate_zy_glm-4-flashx_10_1_expand_agent_com0_False.json"
+    expand_cache_path = r"qwen-turbo\results\debate_zy\geometric_shapes_id\debate_zy_qwen-turbo_10_1_expand_agent_com0_False.json"
     with open(expand_cache_path, "r", encoding="utf-8") as f:
         expand_cache = json.load(f)
 
@@ -1366,7 +1366,7 @@ if __name__ == "__main__":
     # exchagneM: step wise prompt+ solution order+most first
     # exchagneN: random shuffle order
 
-    list_of_tasks = ["math_500_id"]
+    list_of_tasks = ["geometric_shapes_id"]
     list_of_actions = [["expand","exchangeI61","exchangeI61"],["expand","exchangeI41","exchangeI41"]]
 
     # for agent in agents: D

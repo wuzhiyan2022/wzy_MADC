@@ -35,7 +35,7 @@ import numpy as np
 # 答案处理依赖（与 expand.py 完全一致）
 from common.math_equivalence import strip_string
 from eval_all_round import (
-    parse_answer, solve_math_problems, parse_math_anser, parse_YN, most_frequent,
+    parse_answer, parse_answer_bbh, solve_math_problems, parse_math_anser, parse_YN, most_frequent,
     parse_answer_fallback,
 )
 
@@ -133,7 +133,9 @@ def extract_answer_from_text(text: str, is_math: bool = IS_MATH):
       1. parse_math_anser       → \\boxed{...}（最显式）
       2. parse_answer_fallback  → "The answer is: ..."（模型明确陈述答案）
       3. solve_math_problems    → 括号整数 (-?\\d+)（纯格式猜测，兜底）
-    is_math=False：parse_answer → solve_math_problems → parse_YN
+    is_math=False：parse_answer_bbh → solve_math_problems → parse_YN
+      parse_answer_bbh 覆盖 (X)、"The answer is: X"、"Answer: X" 等格式，
+      统一返回 (X) 格式与 GT 对齐，与 eval_all_round.compute_accuracy 完全一致。
     """
     if not text:
         return None
@@ -149,7 +151,7 @@ def extract_answer_from_text(text: str, is_math: bool = IS_MATH):
             return pred_answer
         return None
     else:
-        pred_answer = parse_answer(text)
+        pred_answer = parse_answer_bbh(text)
         if pred_answer is None:
             pred_answer = solve_math_problems(text)
         if pred_answer is None:
