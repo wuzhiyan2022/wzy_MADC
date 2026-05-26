@@ -57,6 +57,10 @@ from wzy_multi_agent_debate_clustering import (
     _diagnose_cluster_overmerge,
     _apply_cluster_labels_to_steps,
     MAJORITY_THRESHOLD,
+    PCA_TARGET_DIM_LARGE,
+    PCA_TARGET_DIM_SMALL,
+    PCA_TARGET_DIM_STEP_THRESHOLD,
+    resolve_pca_target_dim,
     TARGET_DIM,
     # [已注释] DBSCAN 配置已移除
     # DBSCAN_EPS,
@@ -163,10 +167,12 @@ def _resolve_kmeans_k_with_hdbscan(vectors_reduced: np.ndarray, reduction_method
         return k
 
 
-def _resolve_target_dim(reduction_method: str) -> int:
-    """根据降维方法选择「交给聚类」的最终向量维度。"""
+def _resolve_target_dim(reduction_method: str, n_steps: int) -> int:
+    """根据降维方法与 step 数量选择「交给聚类」的最终向量维度。"""
     if reduction_method in ("umap", "pca_umap"):
         return UMAP_N_COMPONENTS
+    if reduction_method == "pca":
+        return resolve_pca_target_dim(n_steps)
     return TARGET_DIM
 
 
@@ -885,7 +891,7 @@ async def _run_single_cluster_exchange_round(
         use_method: 聚类方法："kmeans" | "hdbscan"（DBSCAN 已移除）
         bidirectional: True 时 correct 类簇全置 True、wrong 类簇全置 False；False 时仅 correct 类簇置 True
         reduction_method: 降维方法："pca" | "umap" | "pca_umap"
-            - pca      → 先 L2 → PCA → 再 L2（线性投影 + 单位球面）
+            - pca      → 先 L2 → PCA（目标维按 step 数：<80→15，>=80→20；PCA 后不做 L2）
             - umap     → UMAP（cosine metric 内置标度无关，前后默认不做 L2，保留 manifold）
             - pca_umap → L2 → PCA（中间维见 clustering.PCA_UMAP_INTERMEDIATE_DIM）→ UMAP 至 UMAP_N_COMPONENTS；
                          最终空间同 umap，KMeans 时 k 由 HDBSCAN 探测（与 umap 一致）
@@ -898,20 +904,28 @@ async def _run_single_cluster_exchange_round(
     )
 
     # ══════════════════════════════════════════════════════════
-    # Step 1: 降维（PCA + L2 / UMAP / PCA→UMAP）
+    # Step 1: 降维（PCA / UMAP / PCA→UMAP）
     # ══════════════════════════════════════════════════════════
+    n_steps = step_vectors.shape[0]
     if reduction_method == "umap":
         step1_title = "UMAP 降维"
     elif reduction_method == "pca_umap":
         step1_title = "PCA→UMAP 两阶段降维（L2 + PCA → UMAP）"
     else:
-        step1_title = "PCA 降维 + L2 归一化"
+        step1_title = "PCA 降维"
     print(f"\n{'═'*80}")
     print(f"  [{tag} - Step 1] {step1_title}")
     print(f"{'═'*80}")
-    print(f"    输入向量: {step_vectors.shape[0]} 个, {step_vectors.shape[1]} 维")
-    target_dim_eff = _resolve_target_dim(reduction_method)
-    print(f"    目标维度: {target_dim_eff}（reduction_method={reduction_method}）")
+    print(f"    输入向量: {n_steps} 个, {step_vectors.shape[1]} 维")
+    target_dim_eff = _resolve_target_dim(reduction_method, n_steps=n_steps)
+    if reduction_method == "pca":
+        print(
+            f"    目标维度: {target_dim_eff}（reduction_method={reduction_method}, "
+            f"n_steps={n_steps}, rule: >={PCA_TARGET_DIM_STEP_THRESHOLD}→{PCA_TARGET_DIM_LARGE} "
+            f"else {PCA_TARGET_DIM_SMALL}）"
+        )
+    else:
+        print(f"    目标维度: {target_dim_eff}（reduction_method={reduction_method}）")
 
     if reduction_method == "umap":
         vectors_reduced = _reduce_dimensions_umap(step_vectors, target_dim=target_dim_eff)
@@ -934,9 +948,7 @@ async def _run_single_cluster_exchange_round(
             print(f"    UMAP 后不做 L2（保留 UMAP manifold 几何，UMAP_POST_L2=False）")
     else:
         vectors_reduced = _reduce_dimensions_pca(step_vectors, target_dim=target_dim_eff)
-        norms = np.linalg.norm(vectors_reduced, axis=1, keepdims=True)
-        vectors_reduced = vectors_reduced / (norms + 1e-12)
-        print(f"    PCA 后 L2 归一化完成")
+        print(f"    PCA 后不做 L2（聚类直接在 PCA 坐标上使用 euclidean 距离）")
     print(f"    输出向量: {vectors_reduced.shape[0]} 个, {vectors_reduced.shape[1]} 维")
     print(f"{'═'*80}")
 

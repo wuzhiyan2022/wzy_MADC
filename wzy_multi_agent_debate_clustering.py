@@ -73,8 +73,11 @@ except ImportError:
     UMAP_AVAILABLE = False
 
 # 配置
-MAJORITY_THRESHOLD = 0.6   # 聚类中多数投票的阈值：正确/错误占比 >= 60% 时生效
-TARGET_DIM = 15            # PCA 降维目标维度（针对 LLM 句向量聚类的甜点：5~15 维）
+MAJORITY_THRESHOLD = 0.8   # 聚类中多数投票的阈值：正确/错误占比 >= 80% 时生效
+TARGET_DIM = 15            # PCA 默认目标维（向后兼容；纯 pca 路径请用 resolve_pca_target_dim）
+PCA_TARGET_DIM_SMALL = 15  # step 数 < 80 时的 PCA 目标维
+PCA_TARGET_DIM_LARGE = 20  # step 数 >= 80 时的 PCA 目标维
+PCA_TARGET_DIM_STEP_THRESHOLD = 80
 # 「PCA→UMAP」两阶段路径专用：第一阶段 PCA 的中间维（先去噪线性压缩，再交给 UMAP）
 PCA_UMAP_INTERMEDIATE_DIM = 30
 # [已注释] DBSCAN 聚类方式已移除，改用 HDBSCAN 自动探测
@@ -90,26 +93,26 @@ PCA_UMAP_INTERMEDIATE_DIM = 30
 # KMEANS_K_FIXED_UMAP = 4    # UMAP 路径，匹配 UMAP 的自然簇数
 # KMEANS_K_FIXED = KMEANS_K_FIXED_PCA  # 向后兼容旧名
 
-# HDBSCAN 配置：兼容两条降维路径（PCA + L2 / UMAP 不 L2）
+# HDBSCAN 配置：兼容两条降维路径（PCA 不做 post-L2 / UMAP 不 L2）
 # - min_cluster_size=3：允许 3 个 step 的少数派错误小簇被正式识别为 wrong，
 #   避免被吞为 noise 而失去 bidirectional 修正机会
 # - min_samples=2：core point 的最小邻居数，平衡噪声敏感度
 # - metric=euclidean：
-#     · PCA 路径：在 L2 归一化后，euclidean 与 cosine 单调等价
+#     · PCA 路径：euclidean 直接作用在 PCA 坐标上（各主成分尺度由方差决定）
 #     · UMAP 路径：UMAP 输出本身是 manifold embedding，euclidean 是其自然度量
 HDBSCAN_MIN_CLUSTER_SIZE = 3
 HDBSCAN_MIN_SAMPLES = 2
 HDBSCAN_METRIC = "euclidean"
 
 # UMAP 降维参数：纯 UMAP 视角调优（不为对齐 PCA 妥协）
-# - n_components=10 落在 KMeans/DBSCAN/HDBSCAN 三种聚类的共同甜点
+# - n_components=15 保留更多局部语义结构，适合 50~130 step 的场景
 # - n_neighbors=10 ≈ 期望同质簇大小（每条推理路径上 ~10 个相似 step），保留少数派
 # - min_dist=0.1 给簇内更宽松的呼吸空间，避免 HDBSCAN 因簇内点过密导致核心距离梯度被压平、
 #   簇边界判不准；调大此值可让簇间更分离，缓解过度合并
 # - metric=cosine 是 LLM embedding 的本征几何
 # - random_state=42 复现性；副作用：n_jobs 会自动变 1，N 小不影响速度
 # - pre_l2/post_l2 默认 OFF：cosine metric 已内置标度无关，不必再 L2
-UMAP_N_COMPONENTS = 10
+UMAP_N_COMPONENTS = 15
 UMAP_N_NEIGHBORS = 10
 UMAP_MIN_DIST = 0.1
 UMAP_METRIC = "cosine"
@@ -218,6 +221,13 @@ def get_majority_answer_from_latest(agent_contexts: list, is_math: bool = IS_MAT
     return most_frequent(pred_answers)
 
 
+def resolve_pca_target_dim(n_steps: int) -> int:
+    """按 step 数量选择纯 PCA 路径的目标维度。"""
+    if n_steps >= PCA_TARGET_DIM_STEP_THRESHOLD:
+        return PCA_TARGET_DIM_LARGE
+    return PCA_TARGET_DIM_SMALL
+
+
 def _reduce_dimensions_pca(vectors: np.ndarray, target_dim: int = TARGET_DIM) -> np.ndarray:
     """
     针对 LLM 句向量的 PCA 降维。
@@ -228,9 +238,7 @@ def _reduce_dimensions_pca(vectors: np.ndarray, target_dim: int = TARGET_DIM) ->
       2. PCA 前先做 L2 归一化——把所有向量投到单位球面，让 PCA 在 LLM embedding 的"母语
          几何"（余弦/角距离）上工作；这样学到的主轴反映方向（语义）方差，而非长度方差。
       3. 维度上限取 min(target_dim, N-1, original_dim)，N 较小时 PCA 自动收缩到 N-1。
-
-    下游会再做一次 L2 归一化（投影后向量长度不再为 1，需要重新拉回单位球以让聚类基于
-    余弦/角距离工作）。
+      4. PCA 后不做 L2 归一化；下游聚类直接在 PCA 坐标上使用 euclidean 距离。
 
     Args:
         vectors: 原始向量矩阵，形状 (N, dim)
@@ -905,15 +913,16 @@ async def run_clustering():
 
     print(f"\n[聚类] 向量形状: {step_vectors.shape}, step 数: {len(step_indices)}")
 
-    # 2. 降维
-    vectors_reduced = _reduce_dimensions_pca(step_vectors, target_dim=TARGET_DIM)
+    # 2. 降维（目标维按 step 数动态选择；PCA 后不做 L2）
+    n_steps = step_vectors.shape[0]
+    pca_target_dim = resolve_pca_target_dim(n_steps)
+    print(
+        f"[预处理] PCA 目标维: {pca_target_dim}（n_steps={n_steps}, "
+        f"rule: >={PCA_TARGET_DIM_STEP_THRESHOLD}→{PCA_TARGET_DIM_LARGE} else {PCA_TARGET_DIM_SMALL}）"
+    )
+    vectors_reduced = _reduce_dimensions_pca(step_vectors, target_dim=pca_target_dim)
 
-    # 3. L2 归一化（与 step_clustering 一致，便于聚类）
-    norms = np.linalg.norm(vectors_reduced, axis=1, keepdims=True)
-    vectors_reduced = vectors_reduced / (norms + 1e-12)
-    print("[预处理] L2 归一化完成")
-
-    # 4. KMeans 聚类
+    # 3. KMeans 聚类
     print("\n" + "-" * 60)
     print("[聚类1] KMeans")
     print("-" * 60)

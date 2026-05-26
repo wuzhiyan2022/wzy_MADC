@@ -695,7 +695,7 @@ if __name__ == "__main__":
     # model_names = ["gpt-4o-mini", "qwen2.5-7b-instruct", "qwen2.5-3b-instruct", "glm-4-flashx", "glm-4-flash", "qwen-turbo", "qwen-plus"]
 
     task_name = "geometric_shapes_id"
-    result_path = f"{MODEL_NAME}/results/debate_zy/{task_name}"
+    result_path = f"{MODEL_NAME}/results/debate/{task_name}"
 
     # file_names = [
     #    # "debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False",
@@ -707,7 +707,8 @@ if __name__ == "__main__":
         # "debate_zy_glm-4-flashx_10_1_exchange1_agent_com0_False",
         # "debate_zy_glm-4-flashx_10_1_exchange2_agent_com0_False",
         # "debate_zy_glm-4-flashx_10_1_exchange_bidirectional_1_agent_com0_False",
-        "debate_zy_qwen-turbo_10_1_expand_agent_com0_False",
+        "debate_qwen-turbo_10_3_expand_exchangeI61_exchangeI61_agent_com0_False",
+        "debate_qwen-turbo_10_3_expand_exchangeI41_exchangeI41_agent_com0_False",
     ]
     for file_name in file_names:
         print(f"\n{'='*60}")
