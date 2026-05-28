@@ -86,11 +86,11 @@ VERIFY_VECTORIZATION = True
 # 调试：设为 True 时（且 VERIFY_VECTORIZATION 为 True）将向量保存到文件
 SAVE_DEBUG_FILES = True
 # 数据集与 prompt 配置
-task_name = "geometric_shapes_id"
+task_name = "math_500_id"
 agent_com_name = "agent_com0"
 is_hard = False
 # IS_MATH: math_500_id 等数学数据集设为 True；BBH 选项格式任务设为 False
-IS_MATH = False
+IS_MATH = True
 # ================================
 
 API_URL = "https://api.zhizengzeng.com/v1"

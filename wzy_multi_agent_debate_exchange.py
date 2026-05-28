@@ -246,27 +246,41 @@ def _sort_steps_by_cluster(
     cluster_labels_raw: np.ndarray,
     step_indices: list,
     cluster_tag_results: dict,
+    change_records: list = None,
+    bidirectional: bool = True,
 ) -> list:
     """
     按聚类标签修正后的 is_correct，以 agent 为单位对 step 排序。
 
-    排序规则：
+    【双向修正模式 bidirectional=True】
     A档（全错 agent）：该 agent 所有 step 的 is_correct 均为 False → 排最前面
         agent 之间按 agent_id 升序，agent 内按 step_number 升序。
-    B档（混合 agent）：该 agent 的 step 同时存在 True 和 False → 排中间，分三段：
-        1) 错误 step：所有 B 档 agent 的 is_correct=False step 打散，按 (agent_id, step_number) 升序
-        2) 正确 step（末步错的 agent）：agent 的最后一步 is_correct=False → 该 agent 的正确 step 作为一组排前
-           agent 之间按 agent_id 升序，agent 内按 step_number 升序
-        3) 正确 step（末步对的 agent）：agent 的最后一步 is_correct=True → 该 agent 的正确 step 作为一组排后
-           agent 之间按 agent_id 升序，agent 内按 step_number 升序
+    B档（混合 agent）：以 agent 为整体单位排序，按 agent_score 降序排列：
+        agent_score_i = true_to_false_count_i / total_steps_i
+        其中 true_to_false_count_i 为该 agent 中被从 True 修正为 False 的 step 数量。
+        分数高（被纠错比例大）的 agent 排前，分数低（被纠错比例小）的 agent 排后。
+        同分 agent 之间按 agent_id 升序，agent 内按 step_number 升序。
     C档（全对 agent）：该 agent 所有 step 的 is_correct 均为 True → 排最后面
         agent 之间按 agent_id 升序，agent 内按 step_number 升序。
+
+    【单向修正模式 bidirectional=False】
+    A档（全错 agent）：排最前面，规则同上。
+    B档（混合 agent）：以 agent 为整体单位排序，按 agent_score 升序排列：
+        agent_score_i = false_to_true_count_i / total_steps_i
+        其中 false_to_true_count_i 为该 agent 中被从 False 修正为 True 的 step 数量。
+        分数低（修正比例小）的 agent 排前，分数高（修正比例大）的 agent 排后。
+        同分 agent 之间按 agent_id 升序，agent 内按 step_number 升序。
+    C档（全对 agent）：排最后面，规则同上。
 
     Args:
         steps_modified: 聚类标签修正后的 step 列表（is_correct 已更新）
         cluster_labels_raw: 存储每个向量所属的聚类编号（cluster id）
         step_indices: 向量下标 -> all_steps 下标 的映射列表
         cluster_tag_results: {cluster_id: "correct" | "wrong" | "no_majority" | "noise"}
+        change_records: 标签修正记录列表（由 _apply_cluster_labels_to_steps 返回），
+            用于计算 agent_score（双向：true_to_false 比例；单向：false_to_true 比例），
+            None 时视为无修正记录
+        bidirectional: True 表示双向修正排序逻辑，False 表示单向修正排序逻辑
 
     Returns:
         排序后的新 step 列表（深拷贝，不修改原始数据）
@@ -323,36 +337,49 @@ def _sort_steps_by_cluster(
             sorted(agent_groups[aid], key=lambda s: s.get("step_number", 0))
         )
 
-    # B档：分三段
-    # 段1：所有 B 档 agent 的错误 step（打散）
-    b_wrong: list = []
-    for aid in tier_b:
-        for s in agent_groups[aid]:
-            if s.get("is_correct") is False:
-                b_wrong.append(s)
-    b_wrong.sort(key=lambda s: (s.get("agent_id", 0), s.get("step_number", 0)))
-    sorted_steps.extend(b_wrong)
+    if not bidirectional:
+        # ── 单向修正 B 档：以 agent 为整体，按 agent_score 升序排列 ──
+        # 统计每个 agent 中被从 False 修正为 True 的 step 数
+        agent_false_to_true: dict = {}
+        for rec in (change_records or []):
+            if rec.get("original_label") is False and rec.get("new_label") is True:
+                aid = rec.get("agent_id")
+                agent_false_to_true[aid] = agent_false_to_true.get(aid, 0) + 1
 
-    # 段2+段3：正确 step 以 agent 为单位连续输出
-    #   末步错的 agent → 段2（前）；末步对的 agent → 段3（后）
-    tier_b_last_wrong: list[int] = []
-    tier_b_last_correct: list[int] = []
-    for aid in tier_b:
-        last_step = next(
-            (s for s in agent_groups[aid] if s.get("step_number", 0) == agent_max_step[aid]),
-            None,
-        )
-        if last_step is not None and last_step.get("is_correct") is True:
-            tier_b_last_correct.append(aid)
-        else:
-            tier_b_last_wrong.append(aid)
-    tier_b_last_wrong.sort()
-    tier_b_last_correct.sort()
+        def _agent_score(aid: int) -> float:
+            total = len(agent_groups[aid])
+            f2t = agent_false_to_true.get(aid, 0)
+            return f2t / total if total > 0 else 0.0
 
-    for aid in tier_b_last_wrong + tier_b_last_correct:
-        correct_steps = [s for s in agent_groups[aid] if s.get("is_correct") is True]
-        correct_steps.sort(key=lambda s: s.get("step_number", 0))
-        sorted_steps.extend(correct_steps)
+        tier_b_sorted = sorted(tier_b, key=lambda aid: (_agent_score(aid), aid))
+
+        for aid in tier_b_sorted:
+            agent_steps_sorted = sorted(agent_groups[aid], key=lambda s: s.get("step_number", 0))
+            for s in agent_steps_sorted:
+                s["agent_score"] = round(_agent_score(aid), 4)
+            sorted_steps.extend(agent_steps_sorted)
+    else:
+        # ── 双向修正 B 档：以 agent 为整体，按 agent_score 降序排列 ──
+        # 统计每个 agent 中被从 True 修正为 False 的 step 数
+        agent_true_to_false: dict = {}
+        for rec in (change_records or []):
+            if rec.get("original_label") is True and rec.get("new_label") is False:
+                aid = rec.get("agent_id")
+                agent_true_to_false[aid] = agent_true_to_false.get(aid, 0) + 1
+
+        def _agent_score_bi(aid: int) -> float:
+            total = len(agent_groups[aid])
+            t2f = agent_true_to_false.get(aid, 0)
+            return t2f / total if total > 0 else 0.0
+
+        # 降序：分数高（被纠错多）的 agent 排前
+        tier_b_sorted = sorted(tier_b, key=lambda aid: (-_agent_score_bi(aid), aid))
+
+        for aid in tier_b_sorted:
+            agent_steps_sorted = sorted(agent_groups[aid], key=lambda s: s.get("step_number", 0))
+            for s in agent_steps_sorted:
+                s["agent_score"] = round(_agent_score_bi(aid), 4)
+            sorted_steps.extend(agent_steps_sorted)
 
     # C档：全对 agent，按 agent_id 升序，内部按 step_number 升序
     for aid in tier_c:
@@ -363,10 +390,19 @@ def _sort_steps_by_cluster(
     return sorted_steps
 
 
-def _print_sorted_steps_summary(sorted_steps: list):
-    """打印排序后 step 的顺序摘要，按 A/B/C 三档和 B 档三段展示（供调试用）"""
+def _print_sorted_steps_summary(
+    sorted_steps: list,
+    bidirectional: bool = True,
+    change_records: list = None,
+):
+    """打印排序后 step 的顺序摘要，按 A/B/C 三档展示（供调试用）
+
+    bidirectional=True 时，B 档按 true_to_false_ratio 降序以 agent 为整体展示，标注各 agent 的分数；
+    bidirectional=False 时，B 档按 false_to_true_ratio 升序以 agent 为整体展示，标注各 agent 的分数。
+    """
+    mode_tag = "双向修正" if bidirectional else "单向修正"
     print(f"\n{'═'*80}")
-    print(f"  [排序结果] 共 {len(sorted_steps)} 个 step，排序后顺序（以 agent 分档）")
+    print(f"  [排序结果] 共 {len(sorted_steps)} 个 step，排序后顺序（以 agent 分档，{mode_tag}）")
     print(f"{'═'*80}")
 
     if not sorted_steps:
@@ -395,6 +431,17 @@ def _print_sorted_steps_summary(sorted_steps: list):
         else:
             agent_tier[aid] = "B"
 
+    # 预先统计各 agent 的修正方向数量，用于打印分数
+    agent_correction_count: dict = {}
+    for rec in (change_records or []):
+        orig = rec.get("original_label")
+        new = rec.get("new_label")
+        aid = rec.get("agent_id")
+        if bidirectional and orig is True and new is False:
+            agent_correction_count[aid] = agent_correction_count.get(aid, 0) + 1
+        elif not bidirectional and orig is False and new is True:
+            agent_correction_count[aid] = agent_correction_count.get(aid, 0) + 1
+
     current_section = None
     idx = 0
     for s in sorted_steps:
@@ -409,12 +456,16 @@ def _print_sorted_steps_summary(sorted_steps: list):
         elif tier == "C":
             section = "C档 (全对 agent)"
         else:
-            if is_correct is False:
-                section = "B档·错误 step"
-            elif step_num == agent_max_step.get(aid, -1):
-                section = "B档·正确 step (最后一步/含答案)"
+            # B 档：双向/单向均以 agent 为整体展示，标注 agent_score
+            score = s.get("agent_score")
+            if score is None:
+                total = len(agent_steps_map.get(aid, []))
+                cnt = agent_correction_count.get(aid, 0)
+                score = round(cnt / total, 4) if total > 0 else 0.0
+            if bidirectional:
+                section = f"B档 (混合 agent, Agent{aid}, t2f_score={score:.4f})"
             else:
-                section = "B档·正确 step (非最后一步)"
+                section = f"B档 (混合 agent, Agent{aid}, f2t_score={score:.4f})"
 
         if section != current_section:
             current_section = section
@@ -509,7 +560,9 @@ def _build_exchange_prompt_for_agent(
     suffix = (
         "\n\nUsing the reasoning from other agents as additional advice, "
         "can you give an updated answer? "
-        "Examine your solution and that other agents step by step. "
+        # 新增
+        "Some of the other agents' reasoning steps may be incorrect, so please examine both your own solution and the other agents' reasoning step by step before deciding whether to use them."
+        #"Examine your solution and that other agents step by step. "
         "Please structure your updated reasoning step by step in the format: "
         "Step 1: ... Step 2: ... and so on. "
         "Put your answer in the form (X) at the end of your response."
@@ -1083,9 +1136,10 @@ async def _run_single_cluster_exchange_round(
     print(f"\n{'═'*80}")
     print(f"  [{tag} - Step 5] 经聚类结果标签修正后，以agent为单位进行排序")
     sorted_steps = _sort_steps_by_cluster(
-        steps_modified, cluster_labels_raw, step_indices, cluster_tag_results
+        steps_modified, cluster_labels_raw, step_indices, cluster_tag_results,
+        change_records=change_records, bidirectional=bidirectional,
     )
-    _print_sorted_steps_summary(sorted_steps)
+    _print_sorted_steps_summary(sorted_steps, bidirectional=bidirectional, change_records=change_records)
     print(f"{'═'*80}")
 
     # ══════════════════════════════════════════════════════════

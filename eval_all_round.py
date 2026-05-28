@@ -207,12 +207,15 @@ def parse_answer_fallback(input_str: str):
     """
     兜底答案提取：覆盖 \boxed 和括号整数均提取失败的情况。
 
-    按优先级依次尝试三种格式，取最后一处匹配并经 strip_string 规范化后返回：
+    按优先级依次尝试以下格式，取最后一处匹配并经 strip_string 规范化后返回：
       1. "The answer is: \(\frac{2}{27}\)"  — LaTeX 行内公式 \(...\)
       2. "The answer is: $\frac{16}{27}$"  — $ ... $ 行内公式
-      3. "The answer is: 1"                — 纯数字 / 简单分数（如 -3/4）
+      3. "The answer is: -2 + 7i"          — 复数（a ± bi），必须在纯实数之前匹配
+      4. "The answer is: 7i"               — 纯虚数（bi 或 -bi）
+      5. "The answer is: 1"                — 纯数字 / 简单分数（如 -3/4）
 
     中英文冒号（：/:）均可识别。
+    strip_string 会统一去除空格，故 "-2 + 7i" 与 "-2+7i" 规范化后相同。
     """
     if not input_str:
         return None
@@ -237,7 +240,28 @@ def parse_answer_fallback(input_str: str):
         if ans:
             return ans
 
-    # 3. 纯数字 / 简单分数（-?\d+ 或 -?\d+/\d+）
+    # 3. 复数：a + bi 或 a - bi（含空格变体，如 -2 + 7i / 3 - 5i）
+    #    必须在纯实数段之前匹配，否则 "-2" 会被提前截断
+    m = re.findall(
+        r'[Tt]he\s+answer\s+is\s*[：:]\s*([-]?\d+(?:\.\d+)?\s*[+\-]\s*\d+(?:\.\d+)?i)',
+        input_str,
+    )
+    if m:
+        ans = strip_string(m[-1].strip())
+        if ans:
+            return ans
+
+    # 4. 纯虚数：bi 或 -bi（如 7i / -3i）
+    m = re.findall(
+        r'[Tt]he\s+answer\s+is\s*[：:]\s*([-]?\d+(?:\.\d+)?i)',
+        input_str,
+    )
+    if m:
+        ans = strip_string(m[-1].strip())
+        if ans:
+            return ans
+
+    # 5. 纯数字 / 简单分数（-?\d+ 或 -?\d+/\d+ 或 -?\d+.\d+）
     m = re.findall(
         r'[Tt]he\s+answer\s+is\s*[：:]\s*([-]?\d+(?:[./]\d+)?)',
         input_str,
