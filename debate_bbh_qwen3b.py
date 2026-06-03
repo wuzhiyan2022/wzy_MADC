@@ -24,8 +24,8 @@ API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
 # MODEL_NAME = "qwen2.5-7b-instruct"
 # MODEL_TAG = "qwen2.5-7b-instruct"
-MODEL_NAME = "qwen-turbo"
-MODEL_TAG = "qwen-turbo"
+MODEL_NAME = "gpt-5-mini"
+MODEL_TAG = "gpt-5-mini"
 client = OpenAI(base_url=API_URL,
                        api_key=API_KEY,
                        )
@@ -252,8 +252,17 @@ def construct_exchangeI61_message(agents, question, round):
 
         prefix_string = prefix_string + response
 
-    prefix_string = prefix_string + """\n\n Using the reasoning from other agents as additional advice, can you give an updated answer? Examine your solution and that other agents step by step. Put your answer in the form (X) at the end of your response."""
-    
+    prefix_string = prefix_string + (
+        "\n\n Using the reasoning from other agents as additional advice, "
+        "can you give an updated answer? "
+        "Some of the other agents' reasoning steps may be incorrect, so please examine both your own solution and the other agents' reasoning step by step before deciding whether to use them."
+       # "Examine your solution and that other agents step by step. "
+        "Please structure your updated reasoning step by step in the format: "
+        "Step 1: ... Step 2: ... and so on. "
+        "Put your final answer in the form 'The answer is: X' at the end of your response."
+        #"Put your answer in the form (X) at the end of your response."
+    )
+
     return {"role": "user", "content": prefix_string}
 
 def construct_exchangeI7_message(agents, question, round,gt):
@@ -404,7 +413,12 @@ def construct_exchangeI4_message(agents, question, round,gt,original_question):
         response = "\n\n One agent solution: ```{}```".format(pred_solution)
         prefix_string = prefix_string + response
 
-    prefix_string = prefix_string + f"""\n\nUsing the reasoning from other agents as additional advice, can you give an updated answer? Examine your solution and that other agents step by step. Put your answer in the form (X) at the end of your response."""
+    prefix_string = prefix_string + (
+        "\n\nUsing the reasoning from other agents as additional advice, "
+        "can you give an updated answer? "
+        "Examine your solution and that other agents step by step. "
+        "Put your answer in the form (X) at the end of your response."
+    )
     return {"role": "user", "content": prefix_string}
 
 def construct_exchangeI41_message(agents, question, round,gt,original_question):
@@ -438,7 +452,13 @@ def construct_exchangeI41_message(agents, question, round,gt,original_question):
         response = "\n\n One agent solution: ```{}```".format(pred_solution)
         prefix_string = prefix_string + response
 
-    prefix_string = prefix_string + f"""\n\nUsing the reasoning from other agents as additional advice, can you give an updated answer? Examine your solution and that other agents step by step. Put your answer in the form (X) at the end of your response."""
+    prefix_string = prefix_string + (
+        "\n\nUsing the reasoning from other agents as additional advice, "
+        "can you give an updated answer? "
+        "Examine your solution and that other agents step by step. "
+        "Put your final answer in the form 'The answer is: X' at the end of your response."
+       # "Put your answer in the form (X) at the end of your response."
+    )
     return {"role": "user", "content": prefix_string}
 
 
@@ -931,7 +951,13 @@ def construct_exchangeA_message(agent_context, instruction, idx):
 
     try:
         print("before summary")
-        response = client.chat.completions.create(model=MODEL_TAG, messages=message, max_tokens=512, n=1)
+        response = client.chat.completions.create(
+            model=MODEL_TAG,
+            messages=message,
+            # max_tokens=512,  # 旧模型（如 gpt-4o-mini）使用
+            max_completion_tokens=512,
+            n=1,
+        )
         print("afore summary")
         response_data = json.loads(response.json())
         content = response_data['choices'][0]['message']['content']
@@ -1054,7 +1080,13 @@ def construct_assistant_message(completion):
 
 def generate_answer(answer_context):
     try:
-        response = client.chat.completions.create(model=MODEL_TAG, messages=answer_context, max_tokens=4096, n=1)
+        response = client.chat.completions.create(
+            model=MODEL_TAG,
+            messages=answer_context,
+            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
+            max_completion_tokens=8192,
+            n=1,
+        )
         completion=response.model_dump()
         
         
@@ -1071,8 +1103,13 @@ def generate_answer(answer_context):
 async def agenerate_answer(answer_context):
     try:
         
-        response = await async_client.chat.completions.create(model=MODEL_TAG, 
-        messages=answer_context, max_tokens=4096, n=1)
+        response = await async_client.chat.completions.create(
+            model=MODEL_TAG,
+            messages=answer_context,
+            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
+            max_completion_tokens=8192,
+            n=1,
+        )
         completion=response.model_dump()
         
     except Exception as e:
@@ -1120,7 +1157,7 @@ async def main(agents,rounds,actions):
     fewshot_ost_config = read_json("prompt/fewshot_ost_config.json")
     fewshot_ost_prompt = read_txt("prompt/fewshot_ost_prompt.txt")
     # debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False.json
-    expand_cache_path = r"qwen-turbo\results\debate_zy\geometric_shapes_id\debate_zy_qwen-turbo_10_1_expand_agent_com0_False.json"
+    expand_cache_path = r"gpt-5-mini\results\debate_zy\math_500_id\debate_zy_gpt-5-mini_10_1_expand_agent_com0_False.json"
     with open(expand_cache_path, "r", encoding="utf-8") as f:
         expand_cache = json.load(f)
 
@@ -1366,7 +1403,7 @@ if __name__ == "__main__":
     # exchagneM: step wise prompt+ solution order+most first
     # exchagneN: random shuffle order
 
-    list_of_tasks = ["geometric_shapes_id"]
+    list_of_tasks = ["math_500_id"]
     list_of_actions = [["expand","exchangeI61","exchangeI61"],["expand","exchangeI41","exchangeI41"]]
 
     # for agent in agents: D

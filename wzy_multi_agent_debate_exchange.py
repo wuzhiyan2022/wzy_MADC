@@ -565,7 +565,8 @@ def _build_exchange_prompt_for_agent(
         #"Examine your solution and that other agents step by step. "
         "Please structure your updated reasoning step by step in the format: "
         "Step 1: ... Step 2: ... and so on. "
-        "Put your answer in the form (X) at the end of your response."
+        "Put your final answer in the form 'The answer is: X' at the end of your response."
+       # "Put your answer in the form (X) at the end of your response."
     )
 
     return {"role": "user", "content": prefix + suffix}

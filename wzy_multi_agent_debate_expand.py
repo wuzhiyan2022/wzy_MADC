@@ -98,8 +98,8 @@ API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
 # glm-4-flashx gpt-4o-mini
 # MODEL_NAME = "gpt-4o-mini"
 # MODEL_TAG = "gpt-4o-mini"
-MODEL_NAME = "qwen-turbo"
-MODEL_TAG = "qwen-turbo"
+MODEL_NAME = "gpt-5-mini"
+MODEL_TAG = "gpt-5-mini"
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY)
 async_client = AsyncOpenAI(base_url=API_URL, api_key=API_KEY)
@@ -149,7 +149,11 @@ MAX_RETRIES = 5
 def generate_answer(answer_context, retry_count: int = 0):
     try:
         response = client.chat.completions.create(
-            model=MODEL_TAG, messages=answer_context, max_tokens=4096, n=1
+            model=MODEL_TAG,
+            messages=answer_context,
+            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
+            max_completion_tokens=8192,
+            n=1,
         )
         completion = json.loads(response.json())
     except Exception as e:
@@ -166,7 +170,11 @@ def generate_answer(answer_context, retry_count: int = 0):
 async def agenerate_answer(answer_context, retry_count: int = 0):
     try:
         response = await async_client.chat.completions.create(
-            model=MODEL_TAG, messages=answer_context, max_tokens=4096, n=1
+            model=MODEL_TAG,
+            messages=answer_context,
+            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
+            max_completion_tokens=8192,
+            n=1,
         )
         completion = json.loads(response.json())
     except Exception as e:

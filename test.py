@@ -3,8 +3,12 @@
   - 按阶段展示：先 expand（全体 agent），再 exchange1（全体 agent），以此类推；
   - 磁盘上单行压缩的 JSON 可在「本题原始条目」一节用 indent=2 缩进打印。
 
-用法：在下方「可配置项」里改 QUESTION_ID、DEBATE_DIR、DEBATE_JSON_FILE，然后运行:
+用法：在下方「可配置项」里改 QUESTION_ID、DEBATE_JSON_PATH（或 DEBATE_DIR + DEBATE_JSON_FILE），然后运行:
   python test.py
+
+查看指定题目：COUNT_FILE / COUNT_DIR 设为 None，填写 DEBATE_JSON_PATH 与 QUESTION_ID。
+COUNT_FILE：仅统计单个 JSON 的题目数（优先级最高，会忽略 QUESTION_ID 查看）。
+COUNT_DIR：统计目录下所有 JSON（COUNT_FILE 为 None 时生效）。
 
 QUESTION_ID 可填单个题号（如 1）或列表（如 [1, 5, 10]），一次打印多题时按列表顺序依次输出。
 
@@ -49,21 +53,27 @@ def _rel_display(base: Path, p: Path) -> str:
 
 
 # ---------- 可配置项（改这里即可）----------
-COUNT_ONLY = False  # True：仅统计文件中的题目数量并退出，不打印具体内容
 
-QUESTION_ID: int | str | list[int | str] = [75,76,86,120,124,133,140,142,185,188,205,216,233]  # 单题填 1；多题填 [1, 5, 10]
+# ── 模式 A：查看指定题目（填 DEBATE_JSON_PATH + QUESTION_ID，下面两项统计置 None）──
+DEBATE_JSON_PATH: str | Path | None = (
+    "gpt-5-mini/results/debate_zy/math_500_id/"
+    "debate_zy_gpt-5-mini_10_1_exchange2_agent_com0_False.json"
+)
+QUESTION_ID: int | str | list[int | str] = [1,2]  # 单题填 1；多题填 [1, 5, 10]
 
-# 目录里只有一个 .json 时可填 None，会自动选用该文件；
-# 若有多个 .json，请填写完整文件名，例如:
-# "debate_zy_qwen-turbo_10_1_exchange2_agent_com0_False.json"
-DEBATE_JSON_FILE = "debate_zy_qwen-turbo_10_1_exchange2_agent_com0_False.json"
+# 题库 JSON（用于根据 question_id 匹配结果文件中的键）；与结果文件同模型目录时写 gpt-5-mini/...
+MATH_ID_JSON: str | Path | None = "gpt-5-mini/data/math_500_id.json"
 
-# 结果 JSON 根目录。None 时：若 DEBATE_JSON_FILE 名以 debate_zy 开头则用 results/debate_zy，否则用 results/debate
-# 也可显式写: "qwen2.5-7b-instruct/results/debate_zy"
-DEBATE_DIR: str | Path | None = "qwen-turbo/results/debate_zy/geometric_shapes_id"
+COUNT_ONLY = False  # True：加载文件后只打印题目总数，不打印各 agent 内容
 
-# 题库 JSON：填 None 则用「仓库根/qwen2.5-7b-instruct/data/math_500_id.json」
-MATH_ID_JSON: str | Path | None = "qwen-turbo/data/geometric_shapes_id.json"
+# ── 模式 B：仅统计题目数（与模式 A 二选一，查看题目时 COUNT_FILE/COUNT_DIR 应为 None）──
+COUNT_FILE: str | Path | None = None
+COUNT_DIR: str | Path | None = None
+SHOW_QUESTION_IDS: bool = True
+
+# ── 模式 C：未设 DEBATE_JSON_PATH 时，用目录 + 文件名定位结果 JSON ──
+DEBATE_JSON_FILE: str | None = "debate_zy_gpt-5-mini_10_1_exchange2_agent_com0_False.json"
+DEBATE_DIR: str | Path | None = "gpt-5-mini/results/debate_zy/math_500_id"
 
 # True：在按 agent 打印之后，再输出本题在 JSON 中的整条记录（json缩进，易读）
 PRETTY_PRINT_QUESTION_ENTRY = False
@@ -327,6 +337,20 @@ def pick_debate_file(debate_dir: Path, file_arg: str | None) -> Path:
     return all_json[0].resolve()
 
 
+def resolve_debate_json_path() -> Path:
+    """
+    解析要读取的结果 JSON 路径。
+    优先级：DEBATE_JSON_PATH（完整相对/绝对路径）> DEBATE_DIR + DEBATE_JSON_FILE。
+    """
+    if DEBATE_JSON_PATH is not None and DEBATE_JSON_PATH != "":
+        p = _as_path(DEBATE_JSON_PATH, _REPO_ROOT)
+        if not p.is_file():
+            raise FileNotFoundError(f"DEBATE_JSON_PATH 指向的文件不存在: {p}")
+        return p.resolve()
+    debate_dir = _as_path(DEBATE_DIR, _default_debate_root())
+    return pick_debate_file(debate_dir, DEBATE_JSON_FILE)
+
+
 def dump_json_readable(obj, title: str) -> None:
     """将任意可 JSON 序列化对象缩进打印到 stdout（单文件一行也能看清结构）。"""
     print("\n" + "=" * 80)
@@ -351,13 +375,148 @@ def _default_debate_root() -> Path:
     return base / "debate"
 
 
+def _extract_question_ids(data: dict) -> list[str]:
+    """
+    从 debate / debate_zy 结果 JSON 中提取所有 question_id，按数值排序返回。
+
+    支持两种格式：
+      - debate_zy：value = [agent_contexts, gt, question_id]，取 value[2]
+      - debate_bbh：value 结构相同，取 value[2]
+      - 兜底：若 value[2] 不可用，则用顶层 key 本身作为 id
+    """
+    ids: list[str] = []
+    for key, value in data.items():
+        qid = None
+        if isinstance(value, list) and len(value) >= 3:
+            qid = str(value[2])
+        if qid is None:
+            qid = str(key) if not isinstance(key, str) or len(key) <= 20 else None
+        if qid is not None:
+            ids.append(qid)
+    # 尽量按数值排序，无法转换的按字符串排序
+    try:
+        ids.sort(key=lambda x: int(x))
+    except ValueError:
+        ids.sort()
+    return ids
+
+
+def count_all_jsons_in_dir(dir_path: Path, show_question_ids: bool = False) -> None:
+    """统计指定目录下所有 .json 文件各含多少道题（顶层 key 数量），按文件名排序输出。
+
+    show_question_ids=True 时，额外列出每个文件中的所有 question_id。
+    """
+    json_files = sorted(dir_path.glob("*.json"))
+    if not json_files:
+        print(f"[统计] 目录下未找到任何 .json 文件: {dir_path}")
+        return
+
+    print(f"\n[目录统计] {dir_path}")
+    print(f"{'─' * 70}")
+    max_name_len = max(len(p.name) for p in json_files)
+    total_row = []
+    for p in json_files:
+        try:
+            with p.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                print(f"  {p.name:<{max_name_len}}  N/A（非 dict）")
+                total_row.append((p.name, "N/A"))
+                continue
+            count = len(data)
+        except json.JSONDecodeError as e:
+            print(f"  {p.name:<{max_name_len}}  解析失败: {e}")
+            total_row.append((p.name, f"解析失败"))
+            continue
+        except OSError as e:
+            print(f"  {p.name:<{max_name_len}}  读取失败: {e}")
+            total_row.append((p.name, f"读取失败"))
+            continue
+
+        print(f"\n  {'─' * 66}")
+        print(f"  文件: {p.name}")
+        print(f"  题目数: {count} 道")
+
+        if show_question_ids:
+            qids = _extract_question_ids(data)
+            if qids:
+                # 每行打印 20 个 id，避免单行过长
+                chunk = 20
+                print(f"  question_id 列表（共 {len(qids)} 个，按数值升序）:")
+                for i in range(0, len(qids), chunk):
+                    line = ", ".join(qids[i: i + chunk])
+                    print(f"    {line}")
+            else:
+                print(f"  （无法提取 question_id）")
+
+        total_row.append((p.name, count))
+
+    print(f"\n  {'─' * 66}")
+    numeric_counts = [c for _, c in total_row if isinstance(c, int)]
+    if numeric_counts:
+        print(f"  共 {len(json_files)} 个文件，题目数范围: {min(numeric_counts)} ~ {max(numeric_counts)}")
+    print(f"{'─' * 70}")
+
+
+def count_single_json_file(file_path: Path, show_question_ids: bool = True) -> None:
+    """统计指定 JSON 文件中的题目数量，并可列出全部 question_id。"""
+    if not file_path.exists():
+        print(f"[错误] 文件不存在: {file_path}")
+        return
+
+    try:
+        with file_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"[错误] JSON 解析失败: {e}")
+        return
+    except OSError as e:
+        print(f"[错误] 读取失败: {e}")
+        return
+
+    if not isinstance(data, dict):
+        print(f"[错误] 顶层不是 dict，无法统计题目数")
+        return
+
+    count = len(data)
+    print(f"\n[单文件统计] {file_path.resolve()}")
+    print(f"{'─' * 70}")
+    print(f"  题目数: {count} 道")
+
+    if show_question_ids:
+        qids = _extract_question_ids(data)
+        if qids:
+            chunk = 20
+            print(f"  question_id 列表（共 {len(qids)} 个，按数值升序）:")
+            for i in range(0, len(qids), chunk):
+                line = ", ".join(qids[i: i + chunk])
+                print(f"    {line}")
+        else:
+            print("  （无法从 value[2] 提取 question_id，顶层 key 数量即题目数）")
+    print(f"{'─' * 70}")
+
+
 def main() -> None:
     _configure_stdio_utf8()
 
-    debate_dir = _as_path(DEBATE_DIR, _default_debate_root())
-    debate_path = pick_debate_file(debate_dir, DEBATE_JSON_FILE)
+    # 单文件统计模式（优先级最高）
+    if COUNT_FILE is not None and COUNT_FILE != "":
+        count_file = _as_path(COUNT_FILE, _REPO_ROOT)
+        count_single_json_file(count_file, show_question_ids=SHOW_QUESTION_IDS)
+        return
 
-    print(f"[读取] {debate_path.resolve()}")
+    # 目录批量统计模式
+    if COUNT_DIR is not None and COUNT_DIR != "":
+        count_dir = _as_path(COUNT_DIR, _REPO_ROOT)
+        if not count_dir.exists():
+            print(f"[错误] COUNT_DIR 路径不存在: {count_dir}")
+        else:
+            count_all_jsons_in_dir(count_dir, show_question_ids=SHOW_QUESTION_IDS)
+        return
+
+    debate_path = resolve_debate_json_path()
+
+    print(f"[读取] {debate_path}")
     with debate_path.open("r", encoding="utf-8") as f:
         debate_data = json.load(f)
 
