@@ -36,7 +36,7 @@ import numpy as np
 from common.math_equivalence import strip_string
 from eval_all_round import (
     parse_answer, parse_answer_bbh, solve_math_problems, parse_math_anser, parse_YN, most_frequent,
-    parse_answer_fallback,
+    parse_answer_fallback, _extract_math_answer,
 )
 
 # 聚类与降维依赖
@@ -132,10 +132,10 @@ def extract_answer_from_text(text: str, is_math: bool = IS_MATH):
     """从单个 agent 的回复中提取答案。
 
     与 expand.py 的 extract_answer_from_text 完全一致：
-    is_math=True 三级提取链：
+    is_math=True：直接复用 eval_all_round._extract_math_answer，保证与评测端完全一致：
       1. parse_math_anser       → \\boxed{...}（最显式）
       2. parse_answer_fallback  → "The answer is: ..."（模型明确陈述答案）
-      3. solve_math_problems    → 括号整数 (-?\\d+)（纯格式猜测，兜底）
+      3. solve_math_problems    → 括号整数 (-?\\d+) 兜底（仅当全文无 "The answer is" 标记时启用）
     is_math=False：parse_answer_bbh → solve_math_problems → parse_YN
       parse_answer_bbh 覆盖 (X)、"The answer is: X"、"Answer: X" 等格式，
       统一返回 (X) 格式与 GT 对齐，与 eval_all_round.compute_accuracy 完全一致。
@@ -143,16 +143,7 @@ def extract_answer_from_text(text: str, is_math: bool = IS_MATH):
     if not text:
         return None
     if is_math:
-        pred_answer = parse_math_anser(text)
-        if pred_answer is not None:
-            return strip_string(pred_answer)
-        pred_answer = parse_answer_fallback(text)
-        if pred_answer is not None:
-            return pred_answer
-        pred_answer = solve_math_problems(text)
-        if pred_answer is not None:
-            return pred_answer
-        return None
+        return _extract_math_answer(text)
     else:
         pred_answer = parse_answer_bbh(text)
         if pred_answer is None:

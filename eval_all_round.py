@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import openai
 import numpy as np
 import time
@@ -8,11 +9,30 @@ from openai import OpenAI, AsyncOpenAI
 from common.utils import read_txt, read_json
 from common.math_equivalence import strip_string
 
+
+def _console_encoding():
+    return getattr(sys.stdout, "encoding", None) or "utf-8"
+
+
+def console_safe(text):
+    """按控制台编码输出；GBK 下中文正常，无法编码的字符（如下标 ₅）替换为 ?。"""
+    if not isinstance(text, str):
+        text = str(text)
+    enc = _console_encoding()
+    return text.encode(enc, errors="replace").decode(enc)
+
+
+def console_safe_repr(val, none_label="(无法解析)"):
+    if val is None:
+        return none_label
+    return console_safe(repr(val))
+
+
 # API configuration - please set your own API endpoint and key
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
-MODEL_NAME = "gpt-5-mini"
-MODEL_TAG = "gpt-5-mini"
+MODEL_NAME = "deepseek-v3.2"
+MODEL_TAG = "deepseek-v3.2"
 
 # eval_bbh：每个阶段是否打印每道题的 majority_answer（与 compute_accuracy 返回的 pred_answer 一致）
 PRINT_MAJORITY_PER_QUESTION = True
@@ -203,85 +223,116 @@ def parse_math_anser(input_str):
 
     return solution
 
+def _balanced_outer_paren(s: str) -> bool:
+    """s 以 '(' 开头、')' 结尾时，判断首个 '(' 是否与末尾 ')' 配对（即整体被一对括号包裹）。
+
+    用于区分 "(6-5i)"（整体一对括号）与 "(a+5)(b+2)"（首括号在中间就闭合）。
+    """
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return i == len(s) - 1
+    return False
+
+
+def _clean_answer_text(raw: str) -> str:
+    """清洗 "The answer is" 之后截取的原始答案串：剥壳 + 规范化（方法1 核心）。
+
+    步骤：
+      1) 在“句点/句号 + 空白”处截断答案后的解释性文字（不会误伤小数点 3.14）；
+      2) 去掉尾部句点；
+      3) 递归剥离整体包裹：\\boxed{...}、\\(...\\)、\\[...\\]、$...$、$$...$$；
+      4) strip_string 规范化（去空格等）；
+      5) 条件去掉最外层普通括号：仅当整体被一对括号包裹且内部无逗号时
+         （保留有序对 (3,\\frac{\\pi}{2}) 与因式分解 (a+5)(b+2)，仅剥 (6-5i)→6-5i）。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+
+    # 1) 截断答案后的解释性文字（句读 + 空白处断开；小数点后无空白，不受影响）
+    s = re.split(r'(?<=\S)[\.。]\s', s, maxsplit=1)[0].strip()
+    # 2) 去掉尾部句点
+    s = s.rstrip('.。').strip()
+
+    # 3) 递归剥离整体 LaTeX / \boxed / $ 包裹
+    prev = None
+    while s and s != prev:
+        prev = s
+        mb = re.fullmatch(r'\\boxed\s*\{(.*)\}', s, re.DOTALL)
+        if mb:
+            s = mb.group(1).strip()
+            continue
+        if s.startswith(r'\(') and s.endswith(r'\)') and len(s) >= 4:
+            s = s[2:-2].strip()
+            continue
+        if s.startswith(r'\[') and s.endswith(r'\]') and len(s) >= 4:
+            s = s[2:-2].strip()
+            continue
+        if s.startswith('$$') and s.endswith('$$') and len(s) >= 4:
+            s = s[2:-2].strip()
+            continue
+        if s.startswith('$') and s.endswith('$') and len(s) >= 2:
+            s = s[1:-1].strip()
+            continue
+
+    # 4) strip_string 规范化
+    ans = strip_string(s)
+
+    # 5) 条件去掉最外层普通括号
+    if ans and ans.startswith('(') and ans.endswith(')') and _balanced_outer_paren(ans):
+        inner = ans[1:-1]
+        if ',' not in inner:
+            ans = inner
+    return ans
+
+
 def parse_answer_fallback(input_str: str):
     """
-    兜底答案提取：覆盖 \boxed 和括号整数均提取失败的情况。
+    兜底答案提取（方法1 改进版）：定位最后一次 "The answer is[:：]?"，取其后内容整体剥壳。
 
-    按优先级依次尝试以下格式，取最后一处匹配并经 strip_string 规范化后返回：
-      1. "The answer is: \(\frac{2}{27}\)"  — LaTeX 行内公式 \(...\)
-      2. "The answer is: $\frac{16}{27}$"  — $ ... $ 行内公式
-      3. "The answer is: -2 + 7i"          — 复数（a ± bi），必须在纯实数之前匹配
-      4. "The answer is: 7i"               — 纯虚数（bi 或 -bi）
-      5. "The answer is: 1"                — 纯数字 / 简单分数（如 -3/4）
-
-    中英文冒号（：/:）均可识别。
-    strip_string 会统一去除空格，故 "-2 + 7i" 与 "-2+7i" 规范化后相同。
+    相比旧版多条窄正则，本版本统一处理以下答案包裹格式（不再把表达式截断成前缀数字）：
+      - LaTeX 公式 \\(...\\)、\\[...\\]、$...$、$$...$$、\\boxed{...}
+      - 普通括号 (6-5i)          ← 旧版漏判、并误兜底成 (-3) 的关键格式
+      - 表达式 3\\sqrt{13}、(a+5)(b+2)、有序对 (3,\\frac{\\pi}{2})、裸答案 6-5i / -3/4 / 1
+    并能忽略答案后的解释性文字。中英文冒号均可识别。
     """
     if not input_str:
         return None
 
-    # 1. \( ... \) 格式
-    m = re.findall(
-        r'[Tt]he\s+answer\s+is\s*[：:]\s*\\\((.+?)\\\)',
-        input_str,
-    )
-    if m:
-        ans = strip_string(m[-1].strip())
-        if ans:
-            return ans
+    marker = re.compile(r'[Tt]he\s+answer\s+is\s*[：:]?\s*')
+    last = None
+    for mt in marker.finditer(input_str):
+        last = mt
+    if last is None:
+        return None
 
-    # 2. $ ... $ 格式
-    m = re.findall(
-        r'[Tt]he\s+answer\s+is\s*[：:]\s*\$(.+?)\$',
-        input_str,
-    )
-    if m:
-        ans = strip_string(m[-1].strip())
-        if ans:
-            return ans
+    rest = input_str[last.end():]
+    first_nl = rest.find('\n')
+    same_line = rest if first_nl == -1 else rest[:first_nl]
+    if same_line.strip():
+        tail = same_line
+    else:
+        # 答案可能另起一行书写：取其后最多 200 字符并将换行折叠为空格
+        tail = ' '.join(rest[:200].split())
 
-    # 3. 复数：a + bi 或 a - bi（含空格变体，如 -2 + 7i / 3 - 5i）
-    #    必须在纯实数段之前匹配，否则 "-2" 会被提前截断
-    m = re.findall(
-        r'[Tt]he\s+answer\s+is\s*[：:]\s*([-]?\d+(?:\.\d+)?\s*[+\-]\s*\d+(?:\.\d+)?i)',
-        input_str,
-    )
-    if m:
-        ans = strip_string(m[-1].strip())
-        if ans:
-            return ans
-
-    # 4. 纯虚数：bi 或 -bi（如 7i / -3i）
-    m = re.findall(
-        r'[Tt]he\s+answer\s+is\s*[：:]\s*([-]?\d+(?:\.\d+)?i)',
-        input_str,
-    )
-    if m:
-        ans = strip_string(m[-1].strip())
-        if ans:
-            return ans
-
-    # 5. 纯数字 / 简单分数（-?\d+ 或 -?\d+/\d+ 或 -?\d+.\d+）
-    m = re.findall(
-        r'[Tt]he\s+answer\s+is\s*[：:]\s*([-]?\d+(?:[./]\d+)?)',
-        input_str,
-    )
-    if m:
-        ans = strip_string(m[-1].strip())
-        if ans:
-            return ans
-
-    return None
+    ans = _clean_answer_text(tail)
+    return ans or None
 
 
 def _extract_math_answer(pred_solution: str):
     """
-    数学题三级答案提取：
+    数学题答案提取（方法1+2 改进版）：
       1. parse_math_anser       → \\boxed{...}（最显式）
-      2. parse_answer_fallback  → "The answer is: ..."（模型明确陈述答案）
-      3. solve_math_problems    → 括号整数 (-?\\d+)（纯格式猜测，兜底）
+      2. parse_answer_fallback  → 定位 "The answer is" 并剥壳（支持 (6-5i) 等格式）
+      3. solve_math_problems    → 括号整数 (-?\\d+) 兜底；
+                                  【方法2】仅当全文无 "The answer is" 标记时才启用，
+                                  避免在已有最终答案陈述时抓到推理中间无关的 (整数)。
     返回经 strip_string 规范化的字符串，或 None。
-    三级均失败时打印回复预览，便于人工排查。
     """
     ans = parse_math_anser(pred_solution)
     if ans is not None:
@@ -289,9 +340,10 @@ def _extract_math_answer(pred_solution: str):
     ans = parse_answer_fallback(pred_solution)
     if ans is not None:
         return ans
-    ans = solve_math_problems(pred_solution)
-    if ans is not None:
-        return ans
+    if not re.search(r'[Tt]he\s+answer\s+is', pred_solution or ""):
+        ans = solve_math_problems(pred_solution)
+        if ans is not None:
+            return ans
     return None
 
 
@@ -371,8 +423,8 @@ def compare_equal(str1, str2):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=[{"role": "user", "content": fewshot_content}],
-            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
-            max_completion_tokens=8192,
+            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
+            max_completion_tokens=30000,  # gpt-5-* 等新模型
             n=1,
         )
         completion = json.loads(response.json())
@@ -443,7 +495,7 @@ def eval_bbh(file_name, is_math=False):
                     })
             else:
                 print(f"Warning: Failed to compute accuracy for question {question_idx}")
-                print(f"Ground truth: {gt}")
+                print(f"Ground truth: {console_safe(gt)}")
             idx += 1
         name = stage_names[stage_idx] if stage_idx < len(stage_names) else f"Exchange{stage_idx}"
         pct = correct_cnt / total * 100
@@ -453,12 +505,12 @@ def eval_bbh(file_name, is_math=False):
             for row in per_question_majority:
                 qid = row["question_id"]
                 maj = row["majority_answer"]
-                maj_disp = "(无法解析)" if maj is None else repr(maj)
+                maj_disp = console_safe_repr(maj)
                 print(f"       question_id={qid}  majority_answer={maj_disp}")
                 if PRINT_PER_AGENT_ANSWERS:
                     agents = row.get("agent_answers") or []
                     for ai, ans in enumerate(agents):
-                        ad = "(无法解析)" if ans is None else repr(ans)
+                        ad = console_safe_repr(ans)
                         print(f"         agent {ai}: {ad}")
         if wrong_questions:
             print(f"    -> 错题（共 {len(wrong_questions)} 道）question_id / GT / 多数票预测:")
@@ -467,8 +519,8 @@ def eval_bbh(file_name, is_math=False):
                 gt_s = w.get("gt")
                 pred = w.get("pred_answer")
                 gt_short = gt_s if gt_s is None or len(str(gt_s)) <= 60 else str(gt_s)[:57] + "..."
-                pred_s = "(无法解析多数答案)" if pred is None else repr(pred)
-                print(f"       question_id={qid}  gt={gt_short!r}  pred={pred_s}")
+                pred_s = console_safe_repr(pred, none_label="(无法解析多数答案)")
+                print(f"       question_id={qid}  gt={console_safe(repr(gt_short))}  pred={pred_s}")
         if unparseable:
             print(
                 f"    -> 上述错题中，{len(unparseable)} 道因各 agent 均无有效解析答案导致多数票为空"
@@ -536,7 +588,7 @@ def eval_single(file_name, is_math=False):
             else:
                 # Handle case where accuracy computation failed
                 print(f"Warning: Failed to compute accuracy for question {question_idx}")
-                print(f"Ground truth: {gt}")
+                print(f"Ground truth: {console_safe(gt)}")
             idx += 1
         print(f"Round{round},accuracies:", np.mean(accuracies), np.std(accuracies) / (len(accuracies) ** 0.5))
         accs.append(np.mean(accuracies))
@@ -609,9 +661,9 @@ def extract_bbh(file_name, is_math=False):
 
             if is_math:
                 for pred_solution in pred_solutions:
-                    pred_answer = parse_math_anser(pred_solution)
+                    pred_answer = _extract_math_answer(pred_solution)
                     if pred_answer is not None:
-                        pred_answers.append(strip_string(pred_answer))
+                        pred_answers.append(pred_answer)
             else:
                 for pred_solution in pred_solutions:
                     pred_answer = parse_answer_bbh(pred_solution)
@@ -724,8 +776,8 @@ if __name__ == "__main__":
     # MODEL_NAME = "gpt-4o-mini"
     # model_names = ["gpt-4o-mini", "qwen2.5-7b-instruct", "qwen2.5-3b-instruct", "glm-4-flashx", "glm-4-flash", "qwen-turbo", "qwen-plus"]
 
-    task_name = "math_500_id"
-    result_path = f"{MODEL_NAME}/results/debate_zy/{task_name}"
+    task_name = "geometric_shapes_id"
+    result_path = f"{MODEL_NAME}/results/debate/{task_name}"
 
     # file_names = [
     #    # "debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False",
@@ -733,18 +785,13 @@ if __name__ == "__main__":
     #     # "debate_zy_qwen2.5-7b-instruct_10_1_exchange2_agent_com0_False",
     # ]
     file_names = [
-        # "debate_zy_glm-4-flashx_10_1_expand_agent_com0_False",
-        # "debate_zy_glm-4-flashx_10_1_exchange1_agent_com0_False",
-        # "debate_zy_glm-4-flashx_10_1_exchange2_agent_com0_False",
-        # "debate_zy_glm-4-flashx_10_1_exchange_bidirectional_1_agent_com0_False",
-       # "debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False",
-        # "debate_zy_gpt-5-mini_10_1_expand_agent_com0_False",
-        # "debate_zy_gpt-5-mini_10_1_exchange1_agent_com0_False",
-        #"debate_zy_gpt-5-mini_10_1_exchange2_agent_com0_False",
-        "debate_zy_gpt-5-mini_10_1_exchange_bidirectional_2_agent_com0_False",
+        "debate_deepseek-v3.2_10_3_expand_exchangeI61_exchangeI61_agent_com0_False",
+        "debate_deepseek-v3.2_10_3_expand_exchangeI41_exchangeI41_agent_com0_False",
+        # "debate_gpt-5-mini_10_3_expand_exchangeI61_exchangeI61_agent_com0_False",
+        # "debate_gpt-5-mini_10_3_expand_exchangeI41_exchangeI41_agent_com0_False"
     ]
     for file_name in file_names:
         print(f"\n{'='*60}")
         print(f"  {file_name}")
         print(f"{'='*60}")
-        eval_bbh(file_name, is_math=True)
+        eval_bbh(file_name, is_math=False)

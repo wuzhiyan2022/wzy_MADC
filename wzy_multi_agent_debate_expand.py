@@ -37,7 +37,7 @@ from common.utils import read_txt, read_json
 from common.math_equivalence import strip_string
 from eval_all_round import (
     parse_answer, parse_answer_bbh, solve_math_problems, parse_math_anser, parse_YN, most_frequent,
-    parse_answer_fallback,
+    parse_answer_fallback, _extract_math_answer,
 )
 from wzy_multi_agent_debate_clustering import get_majority_answer_from_latest
 
@@ -98,8 +98,8 @@ API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
 # glm-4-flashx gpt-4o-mini
 # MODEL_NAME = "gpt-4o-mini"
 # MODEL_TAG = "gpt-4o-mini"
-MODEL_NAME = "gpt-5-mini"
-MODEL_TAG = "gpt-5-mini"
+MODEL_NAME = "qwen3-8b"
+MODEL_TAG = "qwen3-8b"
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY)
 async_client = AsyncOpenAI(base_url=API_URL, api_key=API_KEY)
@@ -151,8 +151,8 @@ def generate_answer(answer_context, retry_count: int = 0):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
-            max_completion_tokens=8192,
+            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
+            max_completion_tokens=30000,  # gpt-5-* 等新模型
             n=1,
         )
         completion = json.loads(response.json())
@@ -172,8 +172,8 @@ async def agenerate_answer(answer_context, retry_count: int = 0):
         response = await async_client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
-            max_completion_tokens=8192,
+            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
+            max_completion_tokens=30000,  # gpt-5-* 等新模型
             n=1,
         )
         completion = json.loads(response.json())
@@ -193,10 +193,10 @@ async def agenerate_answer(answer_context, retry_count: int = 0):
 def extract_answer_from_text(text: str, is_math: bool = False):
     """从单个 agent 的回复中提取答案。
 
-    is_math=True 三级提取链：
+    is_math=True：直接复用 eval_all_round._extract_math_answer，保证与评测端完全一致：
       1. parse_math_anser       → \\boxed{...}（最显式）
       2. parse_answer_fallback  → "The answer is: ..."（模型明确陈述答案）
-      3. solve_math_problems    → 括号整数 (-?\\d+)（兜底方法）
+      3. solve_math_problems    → 括号整数 (-?\\d+) 兜底（仅当全文无 "The answer is" 标记时启用）
     is_math=False：parse_answer_bbh → solve_math_problems → parse_YN
       parse_answer_bbh 覆盖 (X)、"The answer is: X"、"Answer: X" 等格式，
       统一返回 (X) 格式与 GT 对齐，与 eval_all_round.compute_accuracy 完全一致。
@@ -204,16 +204,7 @@ def extract_answer_from_text(text: str, is_math: bool = False):
     if not text:
         return None
     if is_math:
-        pred_answer = parse_math_anser(text)
-        if pred_answer is not None:
-            return strip_string(pred_answer)
-        pred_answer = parse_answer_fallback(text)
-        if pred_answer is not None:
-            return pred_answer
-        pred_answer = solve_math_problems(text)
-        if pred_answer is not None:
-            return pred_answer
-        return None
+        return _extract_math_answer(text)
     else:
         pred_answer = parse_answer_bbh(text)
         if pred_answer is None:

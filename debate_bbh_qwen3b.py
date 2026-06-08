@@ -11,7 +11,7 @@ from common.utils import read_txt, read_json
 import os
 from eval_all_round import (
     parse_answer, solve_math_problems, parse_yes_no,
-    parse_math_anser, parse_answer_fallback,
+    parse_math_anser, parse_answer_fallback, _extract_math_answer,
 )
 from common.math_equivalence import strip_string
 from wzy_multi_agent_debate_expand import get_expand_cache_entry
@@ -22,10 +22,10 @@ from wzy_multi_agent_debate_expand import get_expand_cache_entry
 # API configuration - please set your own API endpoint and key
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
-# MODEL_NAME = "qwen2.5-7b-instruct"
-# MODEL_TAG = "qwen2.5-7b-instruct"
-MODEL_NAME = "gpt-5-mini"
-MODEL_TAG = "gpt-5-mini"
+MODEL_NAME = "deepseek-v3.2"
+MODEL_TAG = "deepseek-v3.2"
+# MODEL_NAME = "qwen-turbo"
+# MODEL_TAG = "qwen-turbo"
 client = OpenAI(base_url=API_URL,
                        api_key=API_KEY,
                        )
@@ -229,14 +229,9 @@ def construct_exchangeI61_message(agents, question, round):
     idx = 0
     for pred_solution in pred_solutions:
         idx += 1
-        # 与 eval_all_round._extract_math_answer 一致：boxed → fallback → 括号整数
-        pred_answer = parse_math_anser(pred_solution)
-        if pred_answer is not None:
-            pred_answer = strip_string(pred_answer)
-        if pred_answer is None:
-            pred_answer = parse_answer_fallback(pred_solution)
-        if pred_answer is None:
-            pred_answer = solve_math_problems(pred_solution)
+        # 直接复用 eval_all_round._extract_math_answer：boxed → fallback → 括号整数兜底
+        # （兜底仅当全文无 "The answer is" 标记时启用），与评测端完全一致
+        pred_answer = _extract_math_answer(pred_solution)
 
         if pred_answer is not None:
             pred_answers.append(pred_answer)
@@ -256,11 +251,10 @@ def construct_exchangeI61_message(agents, question, round):
         "\n\n Using the reasoning from other agents as additional advice, "
         "can you give an updated answer? "
         "Some of the other agents' reasoning steps may be incorrect, so please examine both your own solution and the other agents' reasoning step by step before deciding whether to use them."
-       # "Examine your solution and that other agents step by step. "
+        #"Examine your solution and that other agents step by step. "
         "Please structure your updated reasoning step by step in the format: "
         "Step 1: ... Step 2: ... and so on. "
-        "Put your final answer in the form 'The answer is: X' at the end of your response."
-        #"Put your answer in the form (X) at the end of your response."
+        "Put your answer in the form (X) at the end of your response."
     )
 
     return {"role": "user", "content": prefix_string}
@@ -413,12 +407,7 @@ def construct_exchangeI4_message(agents, question, round,gt,original_question):
         response = "\n\n One agent solution: ```{}```".format(pred_solution)
         prefix_string = prefix_string + response
 
-    prefix_string = prefix_string + (
-        "\n\nUsing the reasoning from other agents as additional advice, "
-        "can you give an updated answer? "
-        "Examine your solution and that other agents step by step. "
-        "Put your answer in the form (X) at the end of your response."
-    )
+    prefix_string = prefix_string + f"""\n\nUsing the reasoning from other agents as additional advice, can you give an updated answer? Examine your solution and that other agents step by step. Put your answer in the form (X) at the end of your response."""
     return {"role": "user", "content": prefix_string}
 
 def construct_exchangeI41_message(agents, question, round,gt,original_question):
@@ -432,14 +421,9 @@ def construct_exchangeI41_message(agents, question, round,gt,original_question):
     idx = 0
     for pred_solution in pred_solutions:
         idx += 1
-        # 与 eval_all_round._extract_math_answer 一致：boxed → fallback → 括号整数
-        pred_answer = parse_math_anser(pred_solution)
-        if pred_answer is not None:
-            pred_answer = strip_string(pred_answer)
-        if pred_answer is None:
-            pred_answer = parse_answer_fallback(pred_solution)
-        if pred_answer is None:
-            pred_answer = solve_math_problems(pred_solution)
+        # 直接复用 eval_all_round._extract_math_answer：boxed → fallback → 括号整数兜底
+        # （兜底仅当全文无 "The answer is" 标记时启用），与评测端完全一致
+        pred_answer = _extract_math_answer(pred_solution)
 
         if pred_answer is not None:
             pred_answers.append(pred_answer)
@@ -449,15 +433,17 @@ def construct_exchangeI41_message(agents, question, round,gt,original_question):
     pred_solutions = [x for _, x in sorted(zip(pred_answers, pred_solutions), key=lambda pair: pair[0]==gt, reverse=False)]
 
     for pred_solution in pred_solutions:
-        response = "\n\n One agent solution: ```{}```".format(pred_solution)
+        response = "\n\n One agent solution:\n{}".format(pred_solution)
         prefix_string = prefix_string + response
 
     prefix_string = prefix_string + (
         "\n\nUsing the reasoning from other agents as additional advice, "
-        "can you give an updated answer? "
-        "Examine your solution and that other agents step by step. "
-        "Put your final answer in the form 'The answer is: X' at the end of your response."
-       # "Put your answer in the form (X) at the end of your response."
+        "can you give an updated answer?"
+        "Some of the other agents' reasoning steps may be incorrect, so please examine both your own solution and the other agents' reasoning step by step before deciding whether to use them."
+       # "Examine your solution and that other agents step by step."
+        "Please structure your updated reasoning step by step in the format: "
+        "Step 1: ... Step 2: ... and so on. "
+        "Put your answer in the form (X) at the end of your response."
     )
     return {"role": "user", "content": prefix_string}
 
@@ -954,8 +940,8 @@ def construct_exchangeA_message(agent_context, instruction, idx):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=message,
-            # max_tokens=512,  # 旧模型（如 gpt-4o-mini）使用
-            max_completion_tokens=512,
+            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
+            max_completion_tokens=30000,  # gpt-5-* 等新模型
             n=1,
         )
         print("afore summary")
@@ -1083,8 +1069,8 @@ def generate_answer(answer_context):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
-            max_completion_tokens=8192,
+            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
+            max_completion_tokens=30000,  # gpt-5-* 等新模型
             n=1,
         )
         completion=response.model_dump()
@@ -1106,8 +1092,8 @@ async def agenerate_answer(answer_context):
         response = await async_client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=8192,  # 旧模型（如 gpt-4o-mini）使用
-            max_completion_tokens=8192,
+            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
+            max_completion_tokens=30000,  # gpt-5-* 等新模型
             n=1,
         )
         completion=response.model_dump()
@@ -1157,7 +1143,7 @@ async def main(agents,rounds,actions):
     fewshot_ost_config = read_json("prompt/fewshot_ost_config.json")
     fewshot_ost_prompt = read_txt("prompt/fewshot_ost_prompt.txt")
     # debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False.json
-    expand_cache_path = r"gpt-5-mini\results\debate_zy\math_500_id\debate_zy_gpt-5-mini_10_1_expand_agent_com0_False.json"
+    expand_cache_path = r"deepseek-v3.2\results\debate_zy\geometric_shapes_id\debate_zy_deepseek-v3.2_10_1_expand_agent_com0_False.json"
     with open(expand_cache_path, "r", encoding="utf-8") as f:
         expand_cache = json.load(f)
 
@@ -1403,7 +1389,7 @@ if __name__ == "__main__":
     # exchagneM: step wise prompt+ solution order+most first
     # exchagneN: random shuffle order
 
-    list_of_tasks = ["math_500_id"]
+    list_of_tasks = ["geometric_shapes_id"]
     list_of_actions = [["expand","exchangeI61","exchangeI61"],["expand","exchangeI41","exchangeI41"]]
 
     # for agent in agents: D

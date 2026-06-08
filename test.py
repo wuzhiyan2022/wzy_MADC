@@ -6,9 +6,10 @@
 用法：在下方「可配置项」里改 QUESTION_ID、DEBATE_JSON_PATH（或 DEBATE_DIR + DEBATE_JSON_FILE），然后运行:
   python test.py
 
-查看指定题目：COUNT_FILE / COUNT_DIR 设为 None，填写 DEBATE_JSON_PATH 与 QUESTION_ID。
-COUNT_FILE：仅统计单个 JSON 的题目数（优先级最高，会忽略 QUESTION_ID 查看）。
-COUNT_DIR：统计目录下所有 JSON（COUNT_FILE 为 None 时生效）。
+查看指定题目：COUNT_FILE / COUNT_DIR / COMPARE_JSON_FILES 设为 None，填写 DEBATE_JSON_PATH 与 QUESTION_ID。
+COMPARE_JSON_FILES：对比两个 JSON 的 question_id（优先级最高）。
+COUNT_FILE：仅统计单个 JSON 的题目数。
+COUNT_DIR：统计目录下所有 JSON（COMPARE_JSON_FILES 与 COUNT_FILE 为 None 时生效）。
 
 QUESTION_ID 可填单个题号（如 1）或列表（如 [1, 5, 10]），一次打印多题时按列表顺序依次输出。
 
@@ -66,12 +67,24 @@ MATH_ID_JSON: str | Path | None = "gpt-5-mini/data/math_500_id.json"
 
 COUNT_ONLY = False  # True：加载文件后只打印题目总数，不打印各 agent 内容
 
-# ── 模式 B：仅统计题目数（与模式 A 二选一，查看题目时 COUNT_FILE/COUNT_DIR 应为 None）──
+# ── 模式 B：对比两个 JSON 的 question_id（填 2 个文件名或相对/绝对路径）──
+COMPARE_JSON_DIR: str | Path | None = "gpt-5-mini/results/debate/math_500_id"
+COMPARE_JSON_FILES: list[str | Path] | None = None
+# 置为 None 时会自动扫描 COMPARE_JSON_DIR 目录下的所有 JSON 文件；
+# 若需手动指定，改回类似：
+# COMPARE_JSON_FILES = [
+#     "debate_gpt-5-mini_10_3_expand_exchangeI41_exchangeI41_agent_com0_False.json",
+#     "debate_gpt-5-mini_10_3_expand_exchangeI61_exchangeI61_agent_com0_False.json",
+# ]
+# 对比时是否打印完整 id 列表（题多时可改为 False，仅看数量与差集）
+COMPARE_SHOW_ID_LISTS: bool = True
+
+# ── 模式 C：仅统计题目数 ──
 COUNT_FILE: str | Path | None = None
 COUNT_DIR: str | Path | None = None
 SHOW_QUESTION_IDS: bool = True
 
-# ── 模式 C：未设 DEBATE_JSON_PATH 时，用目录 + 文件名定位结果 JSON ──
+# ── 模式 D：未设 DEBATE_JSON_PATH 时，用目录 + 文件名定位结果 JSON ──
 DEBATE_JSON_FILE: str | None = "debate_zy_gpt-5-mini_10_1_exchange2_agent_com0_False.json"
 DEBATE_DIR: str | Path | None = "gpt-5-mini/results/debate_zy/math_500_id"
 
@@ -458,6 +471,88 @@ def count_all_jsons_in_dir(dir_path: Path, show_question_ids: bool = False) -> N
     print(f"{'─' * 70}")
 
 
+def _resolve_compare_json_path(dir_path: Path, file_spec: str | Path) -> Path:
+    """将文件名或路径解析为绝对路径；相对路径依次尝试 COMPARE_JSON_DIR、仓库根。"""
+    p = Path(file_spec)
+    if p.is_file():
+        return p.resolve()
+    for base in (dir_path, _REPO_ROOT):
+        cand = (base / p).resolve()
+        if cand.is_file():
+            return cand
+    raise FileNotFoundError(
+        f"找不到对比用 JSON: {file_spec!r}（已尝试目录 {dir_path} 与仓库根）"
+    )
+
+
+def _print_question_id_list(title: str, qids: list[str], chunk: int = 20) -> None:
+    print(f"  {title}（共 {len(qids)} 个）:")
+    if not qids:
+        print("    (无)")
+        return
+    for i in range(0, len(qids), chunk):
+        print(f"    {', '.join(qids[i: i + chunk])}")
+
+
+def compare_two_json_question_ids(
+    file_a: Path,
+    file_b: Path,
+    *,
+    show_lists: bool = True,
+) -> None:
+    """加载两个 debate 结果 JSON，对比各自包含的 question_id。"""
+    def load_ids(path: Path) -> list[str]:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise TypeError(f"{path.name} 顶层不是 dict")
+        return _extract_question_ids(data)
+
+    ids_a = load_ids(file_a)
+    ids_b = load_ids(file_b)
+    set_a = set(ids_a)
+    set_b = set(ids_b)
+    only_a = sorted(set_a - set_b, key=lambda x: (len(x), x))
+    only_b = sorted(set_b - set_a, key=lambda x: (len(x), x))
+    both = sorted(set_a & set_b, key=lambda x: (len(x), x))
+
+    try:
+        only_a.sort(key=int)
+        only_b.sort(key=int)
+        both.sort(key=int)
+    except ValueError:
+        pass
+
+    print(f"\n[双文件对比] question_id")
+    print(f"{'─' * 70}")
+    print(f"  文件 A: {_rel_display(_REPO_ROOT, file_a)}")
+    print(f"         题目数 {len(ids_a)}")
+    print(f"  文件 B: {_rel_display(_REPO_ROOT, file_b)}")
+    print(f"         题目数 {len(ids_b)}")
+    print(f"  两文件共有: {len(both)} 道")
+    print(f"  仅在 A 中: {len(only_a)} 道")
+    print(f"  仅在 B 中: {len(only_b)} 道")
+
+    if show_lists:
+        print(f"\n  {'─' * 66}")
+        _print_question_id_list("文件 A 全部 question_id", ids_a)
+        print(f"\n  {'─' * 66}")
+        _print_question_id_list("文件 B 全部 question_id", ids_b)
+        if only_a:
+            print(f"\n  {'─' * 66}")
+            _print_question_id_list("仅在 A、不在 B", only_a)
+        if only_b:
+            print(f"\n  {'─' * 66}")
+            _print_question_id_list("仅在 B、不在 A", only_b)
+    else:
+        if only_a:
+            print(f"  仅在 A: {', '.join(only_a)}")
+        if only_b:
+            print(f"  仅在 B: {', '.join(only_b)}")
+
+    print(f"{'─' * 70}")
+
+
 def count_single_json_file(file_path: Path, show_question_ids: bool = True) -> None:
     """统计指定 JSON 文件中的题目数量，并可列出全部 question_id。"""
     if not file_path.exists():
@@ -499,7 +594,56 @@ def count_single_json_file(file_path: Path, show_question_ids: bool = True) -> N
 def main() -> None:
     _configure_stdio_utf8()
 
-    # 单文件统计模式（优先级最高）
+    # 双文件 question_id 对比（优先级最高）
+    if COMPARE_JSON_FILES is not None and len(COMPARE_JSON_FILES) > 0:
+        if len(COMPARE_JSON_FILES) != 2:
+            print("[错误] COMPARE_JSON_FILES 须恰好包含 2 个 JSON 路径或文件名")
+            raise SystemExit(1)
+        compare_dir = _as_path(
+            COMPARE_JSON_DIR,
+            _REPO_ROOT / "gpt-5-mini" / "results" / "debate" / "math_500_id",
+        )
+        if not compare_dir.is_dir():
+            print(f"[错误] COMPARE_JSON_DIR 不存在: {compare_dir}")
+            raise SystemExit(1)
+        path_a = _resolve_compare_json_path(compare_dir, COMPARE_JSON_FILES[0])
+        path_b = _resolve_compare_json_path(compare_dir, COMPARE_JSON_FILES[1])
+        compare_two_json_question_ids(
+            path_a,
+            path_b,
+            show_lists=COMPARE_SHOW_ID_LISTS,
+        )
+        return
+
+    # 自动扫描目录模式：COMPARE_JSON_FILES 为 None 且 COMPARE_JSON_DIR 已设置
+    if COMPARE_JSON_FILES is None and COMPARE_JSON_DIR is not None and COMPARE_JSON_DIR != "":
+        compare_dir = _as_path(
+            COMPARE_JSON_DIR,
+            _REPO_ROOT / "gpt-5-mini" / "results" / "debate" / "math_500_id",
+        )
+        if not compare_dir.is_dir():
+            print(f"[错误] COMPARE_JSON_DIR 不存在: {compare_dir}")
+            raise SystemExit(1)
+        json_files = sorted(compare_dir.glob("*.json"))
+        if not json_files:
+            print(f"\n[提示] 目录中没有 JSON 文件: {compare_dir}")
+            raise SystemExit(0)
+        print(f"\n[目录扫描] {compare_dir}")
+        print(f"  共发现 {len(json_files)} 个 JSON 文件")
+        if len(json_files) == 2:
+            # 恰好两个文件：直接对比
+            compare_two_json_question_ids(
+                json_files[0],
+                json_files[1],
+                show_lists=COMPARE_SHOW_ID_LISTS,
+            )
+        else:
+            # 其他数量：逐文件统计各自的 question_id
+            for jf in json_files:
+                count_single_json_file(jf, show_question_ids=SHOW_QUESTION_IDS)
+        return
+
+    # 单文件统计模式
     if COUNT_FILE is not None and COUNT_FILE != "":
         count_file = _as_path(COUNT_FILE, _REPO_ROOT)
         count_single_json_file(count_file, show_question_ids=SHOW_QUESTION_IDS)
