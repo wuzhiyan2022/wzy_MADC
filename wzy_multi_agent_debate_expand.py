@@ -100,6 +100,8 @@ API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
 # MODEL_TAG = "gpt-4o-mini"
 MODEL_NAME = "qwen3-8b"
 MODEL_TAG = "qwen3-8b"
+# qwen3-8b 经当前 API 网关时 max_tokens 合法范围为 [1, 8192]；gpt-5-* 等可改用下方注释的 max_completion_tokens
+MAX_TOKENS = 8192
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY)
 async_client = AsyncOpenAI(base_url=API_URL, api_key=API_KEY)
@@ -151,8 +153,8 @@ def generate_answer(answer_context, retry_count: int = 0):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
-            max_completion_tokens=30000,  # gpt-5-* 等新模型
+            max_tokens=MAX_TOKENS,
+            # max_completion_tokens=30000,  # gpt-5-* 等新模型（按需启用）
             n=1,
         )
         completion = json.loads(response.json())
@@ -172,8 +174,8 @@ async def agenerate_answer(answer_context, retry_count: int = 0):
         response = await async_client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
-            max_completion_tokens=30000,  # gpt-5-* 等新模型
+            max_tokens=MAX_TOKENS,
+            # max_completion_tokens=30000,  # gpt-5-* 等新模型（按需启用）
             n=1,
         )
         completion = json.loads(response.json())

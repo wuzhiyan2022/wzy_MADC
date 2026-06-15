@@ -1,0 +1,16 @@
+{
+  "model": "gpt-5-mini",
+  "task": "math_500_id",
+  "exchangeI41_path": "gpt-5-mini\\results\\debate\\math_500_id\\debate_gpt-5-mini_10_3_expand_exchangeI41_exchangeI41_agent_com0_False.json",
+  "exchange1_path": "gpt-5-mini\\results\\debate_zy\\math_500_id\\debate_zy_gpt-5-mini_10_1_exchange1_agent_com0_False.json",
+  "exchangeI41_round": null,
+  "exchange1_round": null,
+  "n_common": 500,
+  "summary": {
+    "i41_False__ex1_False": 78,
+    "i41_False__ex1_True": 1,
+    "i41_True__ex1_True": 421
+  },
+  "n_candidates": 0,
+  "candidates": []
+}

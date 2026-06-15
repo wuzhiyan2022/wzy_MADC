@@ -7,6 +7,7 @@ import openai
 from openai import OpenAI,AsyncOpenAI
 from tqdm import tqdm
 import asyncio
+from typing import Dict, Optional, Set
 from common.utils import read_txt, read_json
 import os
 from eval_all_round import (
@@ -18,20 +19,176 @@ from wzy_multi_agent_debate_expand import get_expand_cache_entry
 
 
 
-
 # API configuration - please set your own API endpoint and key
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk28544f5e4fdc6ce482ee6ae603f8af06469f20a6a4d4b6"
-MODEL_NAME = "deepseek-v3.2"
-MODEL_TAG = "deepseek-v3.2"
+MODEL_NAME = "qwen3-8b"
+MODEL_TAG = "qwen3-8b"
 # MODEL_NAME = "qwen-turbo"
 # MODEL_TAG = "qwen-turbo"
+# qwen3-8b 经当前 API 网关时 max_tokens 合法范围为 [1, 8192]；gpt-5-* 等可改用下方注释的 max_completion_tokens
+MAX_TOKENS = 8192
 client = OpenAI(base_url=API_URL,
                        api_key=API_KEY,
                        )
 async_client = AsyncOpenAI(base_url=API_URL,
                        api_key=API_KEY,
                        )
+
+# ---------- 断点续跑配置 ----------
+# True：启用断点续跑，从 checkpoint 读取已完成题目并跳过
+# False：不启用，每次全量运行（仍会逐题增量写入结果文件）
+ENABLE_CHECKPOINT: bool = True
+
+
+class CheckpointManager:
+    """管理断点续跑的 checkpoint 文件读写。"""
+
+    def __init__(self, checkpoint_path: str):
+        self.path = checkpoint_path
+        self.data: Dict[str, bool] = self._load()
+
+    def _load(self) -> Dict[str, bool]:
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+
+    def save(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, ensure_ascii=False, indent=2)
+
+    def is_completed(self, question_id: str) -> bool:
+        return bool(self.data.get(str(question_id), False))
+
+    def mark_completed(self, question_id: str) -> None:
+        qid = str(question_id)
+        if not self.data.get(qid):
+            self.data[qid] = True
+            self.save()
+            print(f"[断点续跑] question_id={qid} 已完成，已记录")
+
+    def get_completed_count(self) -> int:
+        return sum(1 for v in self.data.values() if v)
+
+
+def _get_run_file_stem(
+    model_name: str,
+    agents: int,
+    rounds: int,
+    actions: list,
+    agent_com_name: str,
+    is_hard: bool,
+) -> str:
+    return "debate_{}_{}_{}_{}_{}_{}".format(
+        model_name, agents, rounds, "_".join(actions), agent_com_name, is_hard
+    )
+
+
+def _get_result_path(
+    model_name: str,
+    task_name: str,
+    agents: int,
+    rounds: int,
+    actions: list,
+    agent_com_name: str,
+    is_hard: bool,
+) -> str:
+    stem = _get_run_file_stem(model_name, agents, rounds, actions, agent_com_name, is_hard)
+    return os.path.join(model_name, "results", "debate", task_name, stem + ".json")
+
+
+def _get_checkpoint_path(
+    model_name: str,
+    task_name: str,
+    agents: int,
+    rounds: int,
+    actions: list,
+    agent_com_name: str,
+    is_hard: bool,
+) -> str:
+    stem = _get_run_file_stem(model_name, agents, rounds, actions, agent_com_name, is_hard)
+    return os.path.join(model_name, "results", "debate", task_name, ".checkpoint_" + stem + ".json")
+
+
+def _atomic_save_json(path: str, data: dict) -> None:
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    except OSError:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
+def _load_existing_results(result_path: str) -> dict:
+    if not os.path.exists(result_path):
+        return {}
+    try:
+        with open(result_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            return loaded
+        print(f"[断点续跑] 结果文件顶层非 JSON 对象，将视为空: {result_path}")
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[断点续跑] 读取结果文件失败 ({e})，将视为空: {result_path}")
+    return {}
+
+
+def _extract_qids_from_results(result_dict: dict) -> Set[str]:
+    qids: Set[str] = set()
+    for v in result_dict.values():
+        if isinstance(v, (list, tuple)) and len(v) >= 3:
+            qids.add(str(v[2]))
+    return qids
+
+
+def _get_completed_qids(
+    checkpoint: Optional[CheckpointManager],
+    result_dict: dict,
+) -> Set[str]:
+    completed: Set[str] = set()
+    if checkpoint is not None:
+        for qid, done in checkpoint.data.items():
+            if done:
+                completed.add(str(qid))
+    completed.update(_extract_qids_from_results(result_dict))
+    return completed
+
+
+def _sync_checkpoint_from_results(
+    checkpoint: CheckpointManager,
+    result_dict: dict,
+) -> None:
+    changed = False
+    for qid in _extract_qids_from_results(result_dict):
+        if not checkpoint.is_completed(qid):
+            checkpoint.data[qid] = True
+            changed = True
+    if changed:
+        checkpoint.save()
+        print(f"[断点续跑] 已从结果文件同步 {checkpoint.get_completed_count()} 条 checkpoint 记录")
+
+
+def _save_one_result(
+    result_path: str,
+    question: str,
+    agent_contexts,
+    answer,
+    question_id,
+) -> None:
+    merged = _load_existing_results(result_path)
+    merged[question] = [agent_contexts, answer, question_id]
+    _atomic_save_json(result_path, merged)
+
 
 def construct_exchange_message(agents, question, round):
     if len(agents) == 0:
@@ -940,8 +1097,8 @@ def construct_exchangeA_message(agent_context, instruction, idx):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=message,
-            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
-            max_completion_tokens=30000,  # gpt-5-* 等新模型
+            max_tokens=MAX_TOKENS,
+            # max_completion_tokens=30000,  # gpt-5-* 等新模型（按需启用）
             n=1,
         )
         print("afore summary")
@@ -1069,8 +1226,8 @@ def generate_answer(answer_context):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
-            max_completion_tokens=30000,  # gpt-5-* 等新模型
+            max_tokens=MAX_TOKENS,
+            # max_completion_tokens=30000,  # gpt-5-* 等新模型（按需启用）
             n=1,
         )
         completion=response.model_dump()
@@ -1092,8 +1249,8 @@ async def agenerate_answer(answer_context):
         response = await async_client.chat.completions.create(
             model=MODEL_TAG,
             messages=answer_context,
-            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
-            max_completion_tokens=30000,  # gpt-5-* 等新模型
+            max_tokens=MAX_TOKENS,
+            # max_completion_tokens=30000,  # gpt-5-* 等新模型（按需启用）
             n=1,
         )
         completion=response.model_dump()
@@ -1131,26 +1288,48 @@ async def main(agents,rounds,actions):
 
     with open("prompt/"+f"prompt_{user_config}"+".txt", "r", encoding="utf-8") as f:
         user_prompt_tmp = f.read()
-    
-    response_dict = {}
 
     hard_id = [str(i) for i in range(1, 101)]
     if is_hard:
         data = [d for d in data if d['question_id'] in hard_id]
         eval_cnt = len(hard_id)
     else:
-        eval_cnt = 250
+        eval_cnt = 500
     fewshot_ost_config = read_json("prompt/fewshot_ost_config.json")
     fewshot_ost_prompt = read_txt("prompt/fewshot_ost_prompt.txt")
     # debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False.json
-    expand_cache_path = r"deepseek-v3.2\results\debate_zy\geometric_shapes_id\debate_zy_deepseek-v3.2_10_1_expand_agent_com0_False.json"
+    expand_cache_path = r"qwen3-8b\results\debate_zy\math_500_id\debate_zy_qwen3-8b_10_1_expand_agent_com0_False.json"
     with open(expand_cache_path, "r", encoding="utf-8") as f:
         expand_cache = json.load(f)
 
-    if os.path.exists("{}/results/debate/{}/debate_{}_{}_{}_{}_{}_{}.json".format(MODEL_NAME,task_name,MODEL_NAME,agents, rounds,"_".join(actions),agent_com_name,is_hard)):
-        print("{}/results/debate/{}/debate_{}_{}_{}_{}_{}_{}.json".format(MODEL_NAME,task_name,MODEL_NAME,agents, rounds,"_".join(actions),agent_com_name,is_hard))
-        print("already exists")
-        return
+    out_dir = os.path.join(MODEL_NAME, "results", "debate", task_name)
+    os.makedirs(out_dir, exist_ok=True)
+    result_path = _get_result_path(
+        MODEL_NAME, task_name, agents, rounds, actions, agent_com_name, is_hard
+    )
+    checkpoint_path = _get_checkpoint_path(
+        MODEL_NAME, task_name, agents, rounds, actions, agent_com_name, is_hard
+    )
+
+    result_dict = _load_existing_results(result_path)
+    checkpoint: Optional[CheckpointManager] = None
+    if ENABLE_CHECKPOINT:
+        checkpoint = CheckpointManager(checkpoint_path)
+        _sync_checkpoint_from_results(checkpoint, result_dict)
+
+    completed_qids = _get_completed_qids(checkpoint, result_dict) if ENABLE_CHECKPOINT else set()
+    pending_indices = [
+        i for i in range(eval_cnt)
+        if str(data[i]["question_id"]) not in completed_qids
+    ]
+
+    if ENABLE_CHECKPOINT:
+        print(f"\n[断点续跑] 结果文件: {result_path}")
+        print(f"[断点续跑] checkpoint: {checkpoint_path}")
+        print(f"[断点续跑] 已完成 {len(completed_qids)}/{eval_cnt} 题，本次待跑 {len(pending_indices)} 题")
+        if not pending_indices:
+            print("[断点续跑] 所有题目已完成，无需运行")
+            return
 
     async def infer_one(data,i):
 
@@ -1359,17 +1538,18 @@ async def main(agents,rounds,actions):
                     assistant_message = construct_assistant_message(completion)
                     agent_contexts[i].append(assistant_message)
 
-        response_dict[question] = (agent_contexts, answer,question_id)
-    
+        _save_one_result(result_path, question, agent_contexts, answer, question_id)
+        if checkpoint is not None:
+            checkpoint.mark_completed(str(question_id))
+
     batch = 2
-    for start in tqdm(range(0, eval_cnt, batch)):
-        end = min(start + batch, eval_cnt)
-        atasks = [infer_one(data, i) for i in range(start, end)]
-        results = await asyncio.gather(*atasks)
-    
-    out_dir = "{}/results/debate/{}".format(MODEL_NAME, task_name)
-    os.makedirs(out_dir, exist_ok=True)
-    json.dump(response_dict, open("{}/debate_{}_{}_{}_{}_{}_{}.json".format(out_dir,MODEL_NAME,agents, rounds,"_".join(actions),agent_com_name,is_hard), "w"))
+    for batch_start in tqdm(range(0, len(pending_indices), batch)):
+        batch_indices = pending_indices[batch_start : batch_start + batch]
+        atasks = [infer_one(data, i) for i in batch_indices]
+        await asyncio.gather(*atasks)
+
+    final_count = len(_load_existing_results(result_path))
+    print(f"\n[完成] 结果已保存至 {result_path}（共 {final_count} 题）")
     
 if __name__ == "__main__":
     
@@ -1389,7 +1569,7 @@ if __name__ == "__main__":
     # exchagneM: step wise prompt+ solution order+most first
     # exchagneN: random shuffle order
 
-    list_of_tasks = ["geometric_shapes_id"]
+    list_of_tasks = ["math_500_id"]
     list_of_actions = [["expand","exchangeI61","exchangeI61"],["expand","exchangeI41","exchangeI41"]]
 
     # for agent in agents: D

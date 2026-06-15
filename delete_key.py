@@ -20,11 +20,11 @@ import os
 QUESTION_IDS = [
     # 在此填写需要重跑的 question_id，例如：
     # "3", "15", "42",
-    "401",
+    "97", "137", "246", "286",
 ]
 
 # 模型名称（对应结果目录和 checkpoint 的根目录）
-MODEL_NAME = "gpt-5-mini"
+MODEL_NAME = "qwen3-8b"
 
 # 任务名称（对应结果目录中的子文件夹）
 TASK_NAME = "math_500_id"

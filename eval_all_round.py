@@ -31,8 +31,10 @@ def console_safe_repr(val, none_label="(无法解析)"):
 # API configuration - please set your own API endpoint and key
 API_URL = "https://api.zhizengzeng.com/v1"
 API_KEY = "sk-zk2825bae2adf40f5eb42183b44b3e0630e69c2098d7527d"
-MODEL_NAME = "deepseek-v3.2"
-MODEL_TAG = "deepseek-v3.2"
+MODEL_NAME = "qwen3-8b"
+MODEL_TAG = "qwen3-8b"
+# 经当前 API 网关时 max_tokens 合法范围为 [1, 8192]；gpt-5-* 等可改用下方注释的 max_completion_tokens
+MAX_TOKENS = 8192
 
 # eval_bbh：每个阶段是否打印每道题的 majority_answer（与 compute_accuracy 返回的 pred_answer 一致）
 PRINT_MAJORITY_PER_QUESTION = True
@@ -423,8 +425,8 @@ def compare_equal(str1, str2):
         response = client.chat.completions.create(
             model=MODEL_TAG,
             messages=[{"role": "user", "content": fewshot_content}],
-            # max_tokens=30000,  # 旧版 OpenAI / qwen 等模型
-            max_completion_tokens=30000,  # gpt-5-* 等新模型
+            max_tokens=MAX_TOKENS,
+            # max_completion_tokens=30000,  # gpt-5-* 等新模型（按需启用）
             n=1,
         )
         completion = json.loads(response.json())
@@ -776,8 +778,8 @@ if __name__ == "__main__":
     # MODEL_NAME = "gpt-4o-mini"
     # model_names = ["gpt-4o-mini", "qwen2.5-7b-instruct", "qwen2.5-3b-instruct", "glm-4-flashx", "glm-4-flash", "qwen-turbo", "qwen-plus"]
 
-    task_name = "geometric_shapes_id"
-    result_path = f"{MODEL_NAME}/results/debate/{task_name}"
+    task_name = "math_500_id"
+    result_path = f"{MODEL_NAME}/results/debate_zy/{task_name}"
 
     # file_names = [
     #    # "debate_zy_qwen2.5-7b-instruct_10_1_expand_agent_com0_False",
@@ -785,8 +787,11 @@ if __name__ == "__main__":
     #     # "debate_zy_qwen2.5-7b-instruct_10_1_exchange2_agent_com0_False",
     # ]
     file_names = [
-        "debate_deepseek-v3.2_10_3_expand_exchangeI61_exchangeI61_agent_com0_False",
-        "debate_deepseek-v3.2_10_3_expand_exchangeI41_exchangeI41_agent_com0_False",
+        "debate_zy_qwen3-8b_10_1_expand_agent_com0_False",
+        "debate_zy_qwen3-8b_10_1_exchange2_agent_com0_False",
+        "debate_zy_qwen3-8b_10_1_exchange_bidirectional_2_agent_com0_False",
+        # "debate_qwen3-8b_10_3_expand_exchangeI61_exchangeI61_agent_com0_False",
+        # "debate_qwen3-8b_10_3_expand_exchangeI41_exchangeI41_agent_com0_False",
         # "debate_gpt-5-mini_10_3_expand_exchangeI61_exchangeI61_agent_com0_False",
         # "debate_gpt-5-mini_10_3_expand_exchangeI41_exchangeI41_agent_com0_False"
     ]
@@ -794,4 +799,4 @@ if __name__ == "__main__":
         print(f"\n{'='*60}")
         print(f"  {file_name}")
         print(f"{'='*60}")
-        eval_bbh(file_name, is_math=False)
+        eval_bbh(file_name, is_math=True)
